@@ -55,10 +55,9 @@ function analyzeVox(vox, thr, box) { const grid = voxGrid(vox, thr, box); return
 // ------------------------------------------------------------------ state
 const A = { animId: 'current', frame: 61, item: null, word: 'Modular', win: null, depth: false, token: 0, dirty: false, tab: 'generator', model: null, anv: null, boxTimer: null,
   bay: null, hl: 'solids', progDepth: false, progWord: 'Modular', pv: null, scan: null };
-const BAY = 9, WIN_BAYS = 2;                                                  // a quadrant = two 9 m bays, the full height and depth
-function nBays(nx) { return Math.ceil(nx / BAY); }
-function winBox(vox, i) { if (i == null) return null; const x0 = i * BAY, x1 = Math.min(vox.nx, (i + WIN_BAYS) * BAY); return { x0, x1, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz }; }
-function winLabel(vox, i) { return i == null ? 'the whole frame' : `bays ${i + 1}–${Math.min(nBays(vox.nx), i + WIN_BAYS)}`; }
+// the five bays of a frame (the same ones the Program tab rates): equal parts across the slab, the full height and depth
+function winBox(vox, i) { if (i == null) return null; const b = bayBoxes(vox)[i]; return b ? { x0: b.x0, x1: b.x1, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz } : null; }
+function winLabel(vox, i) { return i == null ? 'the whole frame' : `bay ${i + 1}`; }
 
 function animationsList() { return [{ id: 'current', name: 'Generator · what is on screen now', builtin: true }, ...PSGen.animations.list()]; }
 function settingsOf(id) { if (id === 'current') return PSGen.current().settings; const a = PSGen.animations.get(id); return a ? a.settings : null; }
@@ -108,7 +107,7 @@ async function loadFrame() {
   const vox = { nx, ny, nz, sizes, max: 255, threshold: THR };
   let solid = 0; for (let i = 0; i < sizes.length; i++) if (sizes[i] >= THR) solid++;
   A.item = { name: `${animName(A.animId)} · frame ${frame}`, animId: A.animId, frame, settings: S, vox, solid, camera: PSGen.camera(S) };
-  if (A.win != null && A.win > nBays(nx) - WIN_BAYS) A.win = null;
+  if (A.win != null && !winBox(vox, A.win)) A.win = null;
   rateWindow();
 }
 /* Rate the chosen part of the frame (a quadrant or the whole frame) and show it everywhere. */
@@ -135,9 +134,8 @@ function renderAll() {
 }
 function renderQuads() {
   const el = $('#quadButtons'), it = A.item; if (!el || !it) return;
-  const n = nBays(it.vox.nx), items = [['', 'Whole frame']];
-  for (let i = 0; i + WIN_BAYS <= n; i++) items.push([String(i), `${i + 1}–${i + WIN_BAYS}`]);
-  el.innerHTML = items.map(([v, t]) => `<button type="button" data-win="${v}" class="btn quiet${(v === '' ? A.win == null : A.win === +v) ? ' on' : ''}" title="${v === '' ? 'Rate the whole frame' : 'Rate bays ' + t + ' (' + (Math.min(it.vox.nx, (+v + WIN_BAYS) * BAY) - (+v) * BAY) + ' m wide)'}">${v === '' ? t : 'Bays ' + t}</button>`).join('');
+  const boxes = bayBoxes(it.vox), items = [['', 'Whole frame', 'Rate the whole frame'], ...boxes.map(b => [String(b.i), `Bay ${b.i + 1}`, `Rate bay ${b.i + 1} · ${b.x0}–${b.x1} m along the slab`])];
+  el.innerHTML = items.map(([v, t, title]) => `<button type="button" data-win="${v}" class="btn quiet${(v === '' ? A.win == null : A.win === +v) ? ' on' : ''}" title="${title}">${t}</button>`).join('');
   el.querySelectorAll('button').forEach(b => b.onclick = () => { A.win = b.dataset.win === '' ? null : +b.dataset.win; rateWindow(); });
 }
 function renderRatings(item) {

@@ -21,13 +21,14 @@ Live at the Vercel deployment of this repository.
   live.
 - **Analyze** — pick an animation (what is on screen in the Generator, the built-in Blender
   scene and Noise loop, or any animation you saved) and a frame. The actual frame is shown
-  through the render camera in the studio-render look; pick a square of it (two 9 m bays)
+  through the render camera in the studio-render look; pick one of its five bays
   or the whole frame to rate, and tick *Depth diagram* to see the flat reading behind the
   ratings with what the selected rating looks at drawn on it. Each rating has a one-line
   question, a score, what the frame shows, what was measured and how to raise it. The full
   rubric-v3 assessment (editable interpretation, combined score, JSON download) and the
   method notes are folded away underneath.
-- **Program** — every 9 m bay of the frame, rated on all twelve descriptors and on its own
+- **Program** — the frame split into five bays (equal parts across the slab, the full height
+  and depth), each rated on all twelve descriptors and on its own
   cubes (solids, floors with headroom, sheltered floors, a roofed hall at the ground, open
   ground, see-through columns, pockets, streets, openings), then scored 0–100 for three uses —
   **Lobby**, **Gathering**, **Working** (`js/program.js`: 60 % descriptors that matter for

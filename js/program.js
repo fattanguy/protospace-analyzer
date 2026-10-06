@@ -1,11 +1,11 @@
-/* ProtoSpace Analyzer — the Program tab's maths: every 9 m bay of a frame, rated for three uses.
-   A bay is one module wide (9 m), the full height and depth of the slab. For each bay:
+/* ProtoSpace Analyzer — the Program tab's maths: the five bays of a frame, rated for three uses.
+   A frame has five bays: equal parts across its length, the full height and depth of the slab. For each bay:
      ratings   the twelve descriptors, read by js/analyzer.js from the bay's own depth grid
      measures  counted straight from the bay's cubes (solids, voids, floors with headroom, cover, ground, see-through)
      programs  Lobby, Gathering and Working, 0–100: 60 % from the descriptors that matter for that use, 40 % from the measures
    Pure ES module (no DOM): the page uses it, and it runs in Node for checks. */
 
-export const BAY = 9;
+export const BAYS = 5;                                   // five bays per frame, each as square as the slab allows
 export const PROGRAMS = {
   lobby: {
     name: 'Lobby', short: 'L', blurb: 'An arrival hall: open at the ground, easy to see across and to move through, and connected to the rest.',
@@ -36,10 +36,10 @@ const ramp = (v, a, b) => clamp01((v - a) / (b - a));
 /* 1 between lo and hi, falling to 0 at lo − w and hi + w. */
 const band = (v, lo, hi, w) => v < lo ? ramp(v, lo - w, lo) : v > hi ? 1 - ramp(v, hi, hi + w) : 1;
 
-/* The bays of a slab: full 9 m bays only (a leftover narrower than 9 m is not rated). */
-export function bayBoxes(vox) {
+/* The bays of a slab: five equal parts across its length, the full height and depth (123 m → 25 / 24 / 25 / 24 / 25 m). */
+export function bayBoxes(vox, n = BAYS) {
   const out = [];
-  for (let i = 0; (i + 1) * BAY <= vox.nx; i++) out.push({ i, x0: i * BAY, x1: (i + 1) * BAY, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz });
+  for (let i = 0; i < n; i++) { const x0 = Math.round(i * vox.nx / n), x1 = Math.round((i + 1) * vox.nx / n); if (x1 > x0) out.push({ i, x0, x1, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz }); }
   return out;
 }
 
