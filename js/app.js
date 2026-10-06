@@ -424,7 +424,7 @@ async function scanAnimation() {
   try {
     for (let f = 1; f <= max; f += step) {
       if (A.scan.stop) break;
-      $('#progScanStatus').textContent = `Frame ${f} of ${max}…`;
+      $('#progScanStatus').textContent = `Frame ${f} of ${max}… (${Math.round(f / max * 100)}%)`;
       const sizes = await PSGen.generate(S, f); if (!sizes) continue;
       const vox = { nx, ny, nz, sizes, max: 255, threshold: THR };
       for (const b of bayBoxes(vox)) {

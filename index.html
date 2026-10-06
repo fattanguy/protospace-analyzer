@@ -179,6 +179,17 @@
     <p class="status num pick-status"></p>
     <p class="hint prog-intro">The frame is split into five bays. Each is rated on all twelve descriptors and on its own cubes, then scored for three uses. The best bay for each use is picked out; select any bay for its deep analysis.</p>
     <div class="prog-winners" id="progWinners"></div>
+    <div class="prog-scan" id="progScan">
+      <div class="prog-scanbar">
+        <span class="eyebrow">Scan the whole animation · the best bay of any frame</span>
+        <label>Every <select id="progStep"><option value="1">1</option><option value="2">2</option><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option></select> frames</label>
+        <button type="button" class="btn" id="progScanGo">Scan</button>
+        <button type="button" class="btn quiet" id="progScanStop" hidden>Stop</button>
+        <span class="hint" id="progScanStatus">Rates every bay of every sampled frame and keeps the best for each use.</span>
+      </div>
+      <div class="prog-results" id="progResults"></div>
+    </div>
+
     <div class="prog-bays" id="progBays"></div>
 
     <div class="prog-deep">
@@ -203,17 +214,6 @@
         <div id="progRatings" class="gen-ratings one"></div>
       </aside>
     </div>
-
-    <details class="more" id="progScan">
-      <summary>Scan the whole animation · the best bay of any frame</summary>
-      <div class="prog-scanbar">
-        <label>Every <select id="progStep"><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option></select> frames</label>
-        <button type="button" class="btn" id="progScanGo">Scan</button>
-        <button type="button" class="btn quiet" id="progScanStop" hidden>Stop</button>
-        <span class="hint" id="progScanStatus">Rates every bay of every sampled frame and keeps the best for each use.</span>
-      </div>
-      <div class="prog-results" id="progResults"></div>
-    </details>
 
     <details class="more">
       <summary>How bays are rated</summary>
