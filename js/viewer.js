@@ -25,7 +25,7 @@ const BAND_NAMES = ['mass at the front', 'first mass 3–8 m back', 'recess 9–
 const CLASS_NAMES = ['', 'work (face mass)', 'gathering pocket', 'street', 'bridge', 'terrace', 'covered recess', 'see-through opening'];
 const CLASS_COLORS = { 0: 0xd6d1cc, 1: 0xd6d1cc, 2: 0x6b5bd2, 3: 0xe07b2a, 4: 0xf0b56b, 5: 0x7aa98f, 6: 0x8a8a8a, 7: 0xffffff };
 const LEVEL_COLORS = [0xdcdcdc, 0xb8b8b8, 0x969696];
-const CUT = 0xe07b2a, BOX_LINE = 0x222222;
+const CUT = 0xe07b2a, BOX_LINE = 0x222222, OUTLINE = 0x6b5bd2;
 const ROUNDED_LIMIT = 6000;                                               // bevelled cubes for small models; plain boxes for the whole slab
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -80,17 +80,14 @@ const SECTIONS = {
           <summary>Crop box</summary>
           <label><input data-v="cropOn" type="checkbox"> Crop to a box</label>
           <div data-v="cropFields" hidden>
-            <p class="hint">Everything outside the box is cut away. Drag the box to slide it around the slab (the green arrow lifts it), or use the sliders. Metres (1 cube = 1 m).</p>
-            <div class="m3d-axis"><span>Along the slab</span>
-              <label>Start <input data-v="boxX" type="range" min="0" max="10" step="1" value="0"><output data-v="boxXv"></output></label>
-              <label>Width <input data-v="boxW" type="range" min="1" max="10" step="1" value="10"><output data-v="boxWv"></output></label></div>
-            <div class="m3d-axis"><span>Up</span>
-              <label>Start <input data-v="boxY" type="range" min="0" max="10" step="1" value="0"><output data-v="boxYv"></output></label>
-              <label>Height <input data-v="boxH" type="range" min="1" max="10" step="1" value="10"><output data-v="boxHv"></output></label></div>
-            <div class="m3d-axis"><span>Deep</span>
-              <label>Start <input data-v="boxZ" type="range" min="0" max="10" step="1" value="0"><output data-v="boxZv"></output></label>
-              <label>Depth <input data-v="boxD" type="range" min="1" max="10" step="1" value="10"><output data-v="boxDv"></output></label></div>
-            <div class="m3d-exports"><button type="button" data-v="boxZoom" class="btn quiet">Zoom to the box</button><button type="button" data-v="boxReset" class="btn quiet">Reset the box</button></div>
+            <p class="hint">Everything outside the box is cut away. Drag the box with the mouse to move it around the slab; make it bigger or smaller here.</p>
+            <div class="m3d-size">
+              <button type="button" data-v="boxSmaller" class="btn quiet" aria-label="Smaller">−</button>
+              <input data-v="boxSize" type="range" min="3" max="40" step="1" value="24" aria-label="Box size">
+              <button type="button" data-v="boxBigger" class="btn quiet" aria-label="Bigger">+</button>
+              <output data-v="boxSizeV"></output>
+            </div>
+            <div class="m3d-exports"><button type="button" data-v="boxZoom" class="btn quiet">Zoom to the box</button><button type="button" data-v="boxReset" class="btn quiet">Put it back</button></div>
           </div>
         </details>`,
   cut: (o) => `
@@ -129,9 +126,9 @@ export function createViewer(root, opts = {}) {
   const M = {
     ready: false, el: root, renderer: null, scene: null, camera: null, controls: null, gizmo: null, pivot: null,
     source: null, cells: null, mesh: null, base: null, boxLines: null, boxFill: null, planes: {}, light: null, fill: null, hemi: null,
-    bbox: null, raf: null, visible: true, pending: null, viewName: 'iso', recording: null, lastKey: '', boxTimer: null,
-    box: { on: false, x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 },
-    settings: { style: 'cubes', sizes: 'actual', color: 'depth', shadows: true, section: false, sectionX: 0, sectionFlip: false, plan: false, planY: 0, planFlip: false, turntable: false },
+    bbox: null, raf: null, visible: true, pending: null, viewName: opts.view || 'iso', recording: null, lastKey: '', boxTimer: null,
+    box: { on: false, outline: false, size: 24, x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 },
+    settings: { style: 'cubes', sizes: 'actual', color: opts.color || 'depth', shadows: true, section: false, sectionX: 0, sectionFlip: false, plan: false, planY: 0, planFlip: false, turntable: false },
   };
 
   // ------------------------------------------------------------------ init
@@ -184,7 +181,7 @@ export function createViewer(root, opts = {}) {
     M.pivot = new THREE.Object3D(); scene.add(M.pivot);
     if (sections.includes('crop')) {
       const tc = new TransformControls(camera, renderer.domElement);
-      tc.setMode('translate'); tc.size = 1.1; tc.enabled = false;
+      tc.setMode('translate'); tc.size = 1.1; tc.enabled = false; tc.showX = false; tc.showZ = false;
       const helper = tc.getHelper(); helper.visible = false; scene.add(helper);
       tc.attach(M.pivot);
       tc.addEventListener('dragging-changed', e => { controls.enabled = !e.value; if (!e.value) boxChanged(); });
@@ -196,11 +193,11 @@ export function createViewer(root, opts = {}) {
     resize();
     new IntersectionObserver(entries => { M.visible = entries[0].isIntersecting; if (M.visible) loop(); }, { threshold: 0 }).observe(viewport);
     renderer.domElement.addEventListener('click', pick);
-    wireBoxDrag(renderer.domElement);
+    if (opts.boxDrag !== false) wireBoxDrag(renderer.domElement);
     wireControls();
     M.ready = true;
     loop();
-    if (M.pending) { const p = M.pending; M.pending = null; setSource(p); }
+    if (M.pending) { const p = M.pending, b = M.pendingBox; M.pending = null; M.pendingBox = undefined; setSource(p, b); }
     if (opts.onReady) opts.onReady(api);
   }
 
@@ -213,7 +210,7 @@ export function createViewer(root, opts = {}) {
     M.renderer.setSize(w, h, false);
     M.renderer.domElement.style.width = '100%'; M.renderer.domElement.style.height = h + 'px';
     M.camera.aspect = w / h; M.camera.updateProjectionMatrix();
-    if (M.viewName === 'camera') cameraView();
+    if (M.viewName === 'camera' && cam && M.cells) cameraView();
   }
 
   function loop() {
@@ -232,24 +229,39 @@ export function createViewer(root, opts = {}) {
   /* src = null | { name, frame, vox: { nx, ny, nz, sizes: Uint8Array (x fastest, then y, then z), max, threshold },
                     camera: null | { position, forward, lens_mm, sensor_mm, sensor_fit, resolution, lattice: fn(world) → [across, up, depth] },
                     result (the analysis of the whole slab, for the "Spaces" colouring), message }   */
-  function setSource(src) {
-    if (!M.ready) { M.pending = src; return; }
+  function setSource(src, box) {                                            // box: undefined keeps the current box, null turns it off, a box sets it
+    if (!M.ready) { M.pending = src; M.pendingBox = box; return; }
     if (src && src.vox && !src.vox.max) src.vox.max = 15;
     const prev = M.source;
     M.source = src;
     if ((!src || !src.vox) && M.viewName === 'camera') leaveCameraView();
     if (src && src.vox && !(prev && prev.vox && prev.vox.nx === src.vox.nx && prev.vox.ny === src.vox.ny && prev.vox.nz === src.vox.nz)) resetBox(false);
+    if (box !== undefined && src && src.vox) { if (!box) M.box.on = false; else Object.assign(M.box, { outline: false }, box, { on: true }); syncBoxControls(); }
     const camBtn = M.el.querySelector('[data-view="camera"]'); if (camBtn) camBtn.disabled = !(src && src.camera);
     rebuild();
   }
 
   // ------------------------------------------------------------------ the crop box
-  function resetBox(notify = true) {
+  /* A cube of `size` metres (clamped to the slab), moved by dragging it; the green arrow lifts it when it is
+     shorter than the slab. The host can also set any box with setBox(). */
+  function resetBox(notify = true) {                                          // a cube in the middle of the front
     const v = M.source && M.source.vox; if (!v) return;
-    Object.assign(M.box, { x0: 0, x1: v.nx, y0: 0, y1: v.ny, z0: 0, z1: v.nz });
-    syncBoxControls(); if (notify) boxChanged(true);
+    const b = M.box, S = b.size;
+    const w = Math.min(S, v.nx), h = Math.min(S, v.ny), d = Math.min(S, v.nz);
+    b.x0 = Math.round((v.nx - w) / 2); b.x1 = b.x0 + w; b.y0 = 0; b.y1 = h; b.z0 = 0; b.z1 = d;
+    syncBoxControls(); applyClipping(); drawBox(); if (notify) boxChanged(true);
   }
-  function boxFromPivot() {                                                   // the gizmo moved: snap the box back onto the lattice
+  function setBoxSize(S) {                                                    // resize about the centre, keeping it inside the slab
+    const v = M.source && M.source.vox, b = M.box; if (!v) return;
+    S = clamp(Math.round(S), 3, 60); b.size = S;
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, cz = (b.z0 + b.z1) / 2;
+    const w = Math.min(S, v.nx), h = Math.min(S, v.ny), d = Math.min(S, v.nz);
+    b.x0 = clamp(Math.round(cx - w / 2), 0, v.nx - w); b.x1 = b.x0 + w;
+    b.y0 = clamp(Math.round(cy - h / 2), 0, v.ny - h); b.y1 = b.y0 + h;
+    b.z0 = clamp(Math.round(cz - d / 2), 0, v.nz - d); b.z1 = b.z0 + d;
+    syncBoxControls(); applyClipping(); drawBox(); boxChanged();
+  }
+  function boxFromPivot() {                                                   // the box was dragged: snap it back onto the lattice
     const v = M.source && M.source.vox, b = M.box; if (!v) return;
     const w = b.x1 - b.x0, h = b.y1 - b.y0, d = b.z1 - b.z0, p = M.pivot.position;
     b.x0 = clamp(Math.round(p.x - w / 2), 0, v.nx - w); b.x1 = b.x0 + w;
@@ -257,49 +269,39 @@ export function createViewer(root, opts = {}) {
     b.z0 = clamp(Math.round(-p.z - d / 2), 0, v.nz - d); b.z1 = b.z0 + d;
     syncBoxControls(); applyClipping(); drawBox();
   }
-  function boxFromSliders() {
-    const v = M.source && M.source.vox, b = M.box; if (!v) return;
-    const w = clamp(+V('boxW').value, 1, v.nx), h = clamp(+V('boxH').value, 1, v.ny), d = clamp(+V('boxD').value, 1, v.nz);
-    b.x0 = clamp(+V('boxX').value, 0, v.nx - w); b.x1 = b.x0 + w;
-    b.y0 = clamp(+V('boxY').value, 0, v.ny - h); b.y1 = b.y0 + h;
-    b.z0 = clamp(+V('boxZ').value, 0, v.nz - d); b.z1 = b.z0 + d;
-    syncBoxControls(); applyClipping(); drawBox(); boxChanged();
-  }
   function syncBoxControls() {
-    const v = M.source && M.source.vox, b = M.box; if (!v || !V('boxX')) return;
-    const w = b.x1 - b.x0, h = b.y1 - b.y0, d = b.z1 - b.z0;
-    const put = (id, val, max) => { const el = V(id); el.max = max; el.value = val; V(id + 'v').textContent = val + ' m'; };
-    put('boxX', b.x0, Math.max(0, v.nx - w)); put('boxW', w, v.nx);
-    put('boxY', b.y0, Math.max(0, v.ny - h)); put('boxH', h, v.ny);
-    put('boxZ', b.z0, Math.max(0, v.nz - d)); put('boxD', d, v.nz);
+    const v = M.source && M.source.vox, b = M.box; if (!v || !V('boxSize')) return;
+    const el = V('boxSize'); el.max = Math.max(v.nx, v.ny, v.nz); el.value = b.size;
+    V('boxSizeV').textContent = `${b.x1 - b.x0} × ${b.y1 - b.y0} × ${b.z1 - b.z0} m`;
     V('cropOn').checked = b.on; V('cropFields').hidden = !b.on;
   }
   function drawBox() {
-    const b = M.box, on = b.on && !!(M.source && M.source.vox);
+    const b = M.box, v = M.source && M.source.vox, on = b.on && !!v;
     M.boxLines.visible = M.boxFill.visible = on;
-    if (M.gizmo) { M.gizmo.enabled = on; M.gizmo.getHelper().visible = on; }
+    if (M.gizmo) { const lift = on && b.y1 - b.y0 < v.ny; M.gizmo.enabled = lift; M.gizmo.getHelper().visible = lift; }
     if (!on) return;
     const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, cz = -(b.z0 + b.z1) / 2;
     for (const o of [M.boxLines, M.boxFill]) { o.position.set(cx, cy, cz); o.scale.set(b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0); }
+    M.boxLines.material.color.setHex(b.outline ? OUTLINE : BOX_LINE); M.boxFill.visible = on && !b.outline;
     M.pivot.position.set(cx, cy, cz);
   }
-  /* The box settled (slider, gizmo drop, toggle): rebuild the exact geometry and tell the host. */
+  /* The box settled (resize, drag drop, toggle): rebuild the exact geometry and tell the host. */
   function boxChanged(now = false) {
     clearTimeout(M.boxTimer);
     const fire = () => { rebuild(); if (opts.onBox) opts.onBox(M.box.on ? Object.assign({}, M.box) : null); };
     if (now) fire(); else M.boxTimer = setTimeout(fire, 120);
   }
-  function setBox(box) {                                                      // host → viewer
+  function setBox(box) {                                                      // host → viewer: any box, or null for off
     const v = M.source && M.source.vox; if (!v) return;
-    if (!box) { M.box.on = false; } else { Object.assign(M.box, box, { on: true }); }
+    if (!box) { M.box.on = false; } else { Object.assign(M.box, { outline: false }, box, { on: true }); }
     syncBoxControls(); applyClipping(); drawBox(); boxChanged(true);
   }
-  function inBox(x, y, z) { const b = M.box; return !b.on || (x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1 && z >= b.z0 && z < b.z1); }
+  function inBox(x, y, z) { const b = M.box; return !b.on || b.outline || (x >= b.x0 && x < b.x1 && y >= b.y0 && y < b.y1 && z >= b.z0 && z < b.z1); }
 
   // ------------------------------------------------------------------ lattice → columns
   /* Columns of the slab (classes, levels, picking, the fused export) and the solid test, with the crop box applied. */
   function computeCells() {
-    const s = M.source, v = s.vox, thr = v.threshold, b = M.box;
+    const s = M.source, v = s.vox, thr = v.threshold, b = Object.assign({}, M.box, { on: M.box.on && !M.box.outline });
     const F = s.result && !s.result.features.empty ? s.result.features : null, cls = F ? F.classes : null;
     const idx = (x, y, z) => x + v.nx * (y + v.ny * z);
     const solidAt = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < v.nx && y < v.ny && z < v.nz && v.sizes[idx(x, y, z)] >= thr && inBox(x, y, z);
@@ -410,7 +412,7 @@ export function createViewer(root, opts = {}) {
     const C = computeCells(); M.cells = C;
     const s = M.settings, v = M.source.vox, unlit = s.color === 'render', b = M.box;
     empty.hidden = C.cells.length > 0;
-    if (!C.cells.length) { empty.textContent = b.on ? 'Nothing solid inside the box — move it or make it bigger.' : 'No cube reaches the mass threshold, so there is nothing to model.'; }
+    if (!C.cells.length) { empty.textContent = b.on && !b.outline ? 'Nothing solid inside the box — move it or make it bigger.' : 'No cube reaches the mass threshold, so there is nothing to model.'; }
     const matOpts = { side: THREE.DoubleSide, clipShadows: true };
     let cubeCount = 0, tris = 0;
     if (C.cells.length) {
@@ -447,7 +449,7 @@ export function createViewer(root, opts = {}) {
       s.sectionX = +sx.value; s.planY = +sy.value;
     }
     syncBoxControls(); applyClipping(); drawBox();
-    const what = b.on ? `box ${b.x1 - b.x0} × ${b.y1 - b.y0} m, ${b.z1 - b.z0} m deep` : `${v.nx} × ${v.ny} m slab, ${depth} m deep`;
+    const what = b.on && !b.outline ? `box ${b.x1 - b.x0} × ${b.y1 - b.y0} m, ${b.z1 - b.z0} m deep` : `${v.nx} × ${v.ny} m slab, ${depth} m deep`;
     stats.textContent = `${M.source.name} · ${what} · ${fmtN(C.solidCount)} solid cubes${s.style === 'cubes' && cubeCount ? ` (${fmtN(cubeCount)} drawn)` : ''} · ${fmtN(tris)} triangles`;
     info.textContent = C.cells.length ? 'Click a cube for its reading.' : '';
     const key = `${v.nx}x${v.ny}x${v.nz}`;
@@ -469,7 +471,7 @@ export function createViewer(root, opts = {}) {
       const p = M.planes.plan; p.visible = true; p.geometry.dispose(); p.geometry = new THREE.PlaneGeometry(v.nx + 2, depth + 2);
       p.rotation.set(-Math.PI / 2, 0, 0); p.position.set(v.nx / 2, s.planY, -depth / 2 + 0.5);
     } else M.planes.plan.visible = false;
-    if (b.on) {                                                                 // instant crop while the box moves; the rebuild makes it exact
+    if (b.on && !b.outline) {                                                   // instant crop while the box moves; the rebuild makes it exact
       planes.push(new THREE.Plane(new THREE.Vector3(1, 0, 0), -b.x0), new THREE.Plane(new THREE.Vector3(-1, 0, 0), b.x1),
         new THREE.Plane(new THREE.Vector3(0, 1, 0), -b.y0), new THREE.Plane(new THREE.Vector3(0, -1, 0), b.y1),
         new THREE.Plane(new THREE.Vector3(0, 0, 1), b.z1), new THREE.Plane(new THREE.Vector3(0, 0, -1), -b.z0));
@@ -529,6 +531,7 @@ export function createViewer(root, opts = {}) {
   function wireBoxDrag(el) {
     let drag = null;
     const hitBox = e => { if (!M.box.on || !M.boxFill.visible) return null; castRay(e); return ray.intersectObject(M.boxFill, false)[0] || null; };
+    el.addEventListener('pointerleave', () => { if (!drag) el.style.cursor = ''; });
     el.addEventListener('pointerdown', e => {
       if (e.button !== 0 || (M.gizmo && M.gizmo.axis)) return;
       const hit = hitBox(e); if (!hit) return;
@@ -577,7 +580,7 @@ export function createViewer(root, opts = {}) {
 
   // ------------------------------------------------------------------ exports
   function download(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
-  function baseName() { const n = (M.source && M.source.name || 'frame').replace(/[^\w.-]+/g, '_').slice(0, 60); return `ProtoSpace-${n}${M.box.on ? '-box' : ''}-3D`; }
+  function baseName() { const n = (M.source && M.source.name || 'frame').replace(/[^\w.-]+/g, '_').slice(0, 60); return `ProtoSpace-${n}${M.box.on && !M.box.outline ? '-box' : ''}-3D`; }
   function snapshot() {
     if (!M.mesh) return;
     const r = M.renderer, w = r.domElement.clientWidth, h = r.domElement.clientHeight, dpr = r.getPixelRatio();
@@ -658,8 +661,10 @@ export function createViewer(root, opts = {}) {
     on('plan', 'change', e => { s.plan = e.target.checked; rebuild(); });
     on('planY', 'input', e => { s.planY = +e.target.value; applyClipping(); });
     on('planFlip', 'click', () => { s.planFlip = !s.planFlip; applyClipping(); });
-    on('cropOn', 'change', e => { M.box.on = e.target.checked; if (M.box.on && M.source && M.source.vox) { const v = M.source.vox; if (M.box.x1 - M.box.x0 >= v.nx && M.box.y1 - M.box.y0 >= v.ny && M.box.z1 - M.box.z0 >= v.nz) Object.assign(M.box, { x0: Math.round(v.nx * 0.3), x1: Math.round(v.nx * 0.7), y0: 0, y1: v.ny, z0: 0, z1: Math.min(v.nz, 12) }); } syncBoxControls(); applyClipping(); drawBox(); boxChanged(true); });
-    for (const id of ['boxX', 'boxW', 'boxY', 'boxH', 'boxZ', 'boxD']) on(id, 'input', boxFromSliders);
+    on('cropOn', 'change', e => { M.box.on = e.target.checked; if (M.box.on) resetBox(true); else { syncBoxControls(); applyClipping(); drawBox(); boxChanged(true); } });
+    on('boxSize', 'input', e => setBoxSize(+e.target.value));
+    on('boxSmaller', 'click', () => setBoxSize(M.box.size - 3));
+    on('boxBigger', 'click', () => setBoxSize(M.box.size + 3));
     on('boxReset', 'click', () => resetBox(true));
     on('boxZoom', 'click', zoomToBox);
     M.el.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => view(b.dataset.view)));

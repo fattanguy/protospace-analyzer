@@ -51,20 +51,12 @@ function voxGrid(vox, thr, box) {
   return { cols, rows, tone, band, depth, pitch: CELL, px: 0, py: 0, invert: false, w: cols * CELL, h: rows * CELL };
 }
 function analyzeVox(vox, thr, box) { const grid = voxGrid(vox, thr, box); return { grid, result: PSA.analyze(grid) }; }
-function elevationCanvas(G) {
-  const c = document.createElement('canvas'); c.width = G.cols * CELL; c.height = G.rows * CELL;
-  const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-  for (let r = 0; r < G.rows; r++) for (let col = 0; col < G.cols; col++) {
-    const i = r * G.cols + col; if (G.depth[i] < 0) continue;
-    const t = Math.round(G.tone[i] * 255); x.fillStyle = `rgb(${t},${t},${t})`;
-    x.fillRect(col * CELL, (G.rows - 1 - r) * CELL, CELL, CELL);
-    x.fillStyle = 'rgba(255,255,255,0.18)'; x.fillRect(col * CELL, (G.rows - 1 - r) * CELL, CELL, 1); x.fillRect(col * CELL, (G.rows - 1 - r) * CELL, 1, CELL);
-  }
-  return c;
-}
-
 // ------------------------------------------------------------------ state
-const A = { animId: 'current', frame: 61, item: null, word: 'Modular', view: 'image', token: 0, dirty: false, tab: 'generator', loading: false, model: null, boxTimer: null };
+const A = { animId: 'current', frame: 61, item: null, word: 'Modular', win: null, depth: false, token: 0, dirty: false, tab: 'generator', model: null, anv: null, boxTimer: null };
+const BAY = 9, WIN_BAYS = 2;                                                  // a quadrant = two 9 m bays, the full height and depth
+function nBays(nx) { return Math.ceil(nx / BAY); }
+function winBox(vox, i) { if (i == null) return null; const x0 = i * BAY, x1 = Math.min(vox.nx, (i + WIN_BAYS) * BAY); return { x0, x1, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz }; }
+function winLabel(vox, i) { return i == null ? 'the whole frame' : `bays ${i + 1}–${Math.min(nBays(vox.nx), i + WIN_BAYS)}`; }
 
 function animationsList() { return [{ id: 'current', name: 'Generator · what is on screen now', builtin: true }, ...PSGen.animations.list()]; }
 function settingsOf(id) { if (id === 'current') return PSGen.current().settings; const a = PSGen.animations.get(id); return a ? a.settings : null; }
@@ -112,19 +104,38 @@ async function loadFrame() {
   if (!sizes || token !== A.token) return;
   const [nx, ny, nz] = S.dims;
   const vox = { nx, ny, nz, sizes, max: 255, threshold: THR };
-  const { grid, result } = analyzeVox(vox, THR);
   let solid = 0; for (let i = 0; i < sizes.length; i++) if (sizes[i] >= THR) solid++;
-  A.item = { name: `${animName(A.animId)} · frame ${frame}`, animId: A.animId, frame, settings: S, vox, solid, camera: PSGen.camera(S), grid, result, canvas: elevationCanvas(grid), R: { x0: 0, y0: 0, x1: grid.cols * CELL, y1: grid.rows * CELL }, reviews: {} };
+  A.item = { name: `${animName(A.animId)} · frame ${frame}`, animId: A.animId, frame, settings: S, vox, solid, camera: PSGen.camera(S) };
+  if (A.win != null && A.win > nBays(nx) - WIN_BAYS) A.win = null;
+  rateWindow();
+}
+/* Rate the chosen part of the frame (a quadrant or the whole frame) and show it everywhere. */
+function rateWindow() {
+  const it = A.item; if (!it) return;
+  const box = winBox(it.vox, A.win);
+  const { grid, result } = analyzeVox(it.vox, THR, box);
+  Object.assign(it, { box, grid, result, R: { x0: 0, y0: 0, x1: grid.cols * CELL, y1: grid.rows * CELL }, reviews: {} });
+  renderQuads();
   renderAll();
 }
-function setStatus(t) { for (const el of $$('.pick-status')) el.textContent = t; }
+function setStatus(t, tModel) { $$('.pick-status').forEach(el => { el.textContent = tModel != null && el.closest('.tab[data-tab=model]') ? tModel : t; }); }
 
 // ------------------------------------------------------------------ render
 function renderAll() {
   const it = A.item; if (!it) return;
-  setStatus(`${it.name} · ${it.vox.nx} × ${it.vox.ny} m slab, ${it.vox.nz} m deep · ${it.solid.toLocaleString('en-US')} solid cubes`);
+  const base = `${it.name} · ${it.vox.nx} × ${it.vox.ny} m slab, ${it.vox.nz} m deep · ${it.solid.toLocaleString('en-US')} solid cubes`;
+  setStatus(`${base} · rating ${winLabel(it.vox, A.win)}`, base);
   renderRatings(it); renderWhy(it); drawView(it);
-  if (A.model) { A.model.setSource({ name: it.name, frame: it.frame, vox: it.vox, camera: it.camera, result: it.result }); rateBox(A.model.box); }
+  const src = { name: it.name, frame: it.frame, vox: it.vox, camera: it.camera, result: it.result };
+  if (A.anv) A.anv.setSource(src, it.box ? Object.assign({ outline: true }, it.box) : null);
+  if (A.model) { A.model.setSource(src); rateBox(A.model.box); }
+}
+function renderQuads() {
+  const el = $('#quadButtons'), it = A.item; if (!el || !it) return;
+  const n = nBays(it.vox.nx), items = [['', 'Whole frame']];
+  for (let i = 0; i + WIN_BAYS <= n; i++) items.push([String(i), `${i + 1}–${i + WIN_BAYS}`]);
+  el.innerHTML = items.map(([v, t]) => `<button type="button" data-win="${v}" class="btn quiet${(v === '' ? A.win == null : A.win === +v) ? ' on' : ''}" title="${v === '' ? 'Rate the whole frame' : 'Rate bays ' + t + ' (' + (Math.min(it.vox.nx, (+v + WIN_BAYS) * BAY) - (+v) * BAY) + ' m wide)'}">${v === '' ? t : 'Bays ' + t}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => b.onclick = () => { A.win = b.dataset.win === '' ? null : +b.dataset.win; rateWindow(); });
 }
 function renderRatings(item) {
   const list = $('#ratings'); list.innerHTML = '';
@@ -208,10 +219,10 @@ function hatchPattern(ctx, color, angle, spacing) {
 }
 function drawView(item) {
   const cv = $('#view'), R = item.R, G = item.grid, res = item.result;
-  if (!cv.parentElement.clientWidth) return;                                   // tab hidden
+  if (!A.depth || !cv.parentElement.clientWidth) return;                       // diagram off, or tab hidden
   const maxW = cv.parentElement.clientWidth || 900;
   const rw = R.x1 - R.x0, rh = R.y1 - R.y0;
-  const k = Math.min(maxW / rw, 620 / rh);
+  const k = Math.min(maxW / rw, 620 / rh, 22 / CELL);
   const dpr = window.devicePixelRatio || 1;
   cv.width = Math.round(rw * k * dpr); cv.height = Math.round(rh * k * dpr);
   cv.style.width = Math.round(rw * k) + 'px'; cv.style.height = Math.round(rh * k) + 'px';
@@ -219,23 +230,19 @@ function drawView(item) {
   const cell = G.pitch * k;                                                    // one metre on screen
   const cx = c => G.px * k + c * cell, cy = r => G.py * k + (G.rows - 1 - r) * cell;
   x.fillStyle = '#fff'; x.fillRect(0, 0, rw * k, rh * k);
-  if (A.view === 'image') {
-    x.drawImage(item.canvas, R.x0, R.y0, rw, rh, 0, 0, rw * k, rh * k);
-  } else {
-    for (let r = 0; r < G.rows; r++) for (let c = 0; c < G.cols; c++) {
-      const b = G.band[r * G.cols + c]; const t = PSA.BAND_TONES[b];
-      x.fillStyle = `rgb(${t},${t},${t})`; x.fillRect(cx(c), cy(r), cell + 0.5, cell + 0.5);
-    }
-    if (!res.features.empty) {
-      const hp = hatchPattern(x, 'rgba(30,30,30,0.9)', 45, 7);
-      res.features.pockets.forEach(p => { x.fillStyle = 'rgba(238,238,238,0.85)'; p.cells.forEach(([c, r]) => x.fillRect(cx(c), cy(r), cell + 0.5, cell + 0.5)); x.fillStyle = hp; p.cells.forEach(([c, r]) => x.fillRect(cx(c), cy(r), cell + 0.5, cell + 0.5)); });
-      const E = res.features.envelope, Mo = res.features.modules;
-      x.strokeStyle = 'rgba(0,0,0,0.25)'; x.lineWidth = 1;
-      for (let m = 0; m <= Mo.nm; m++) { const X = cx(Mo.mo + m * 9); x.beginPath(); x.moveTo(X, cy(E.rmax)); x.lineTo(X, cy(E.r0) + cell); x.stroke(); }
-      for (let f = 0; f <= Mo.nf; f++) { const Y = cy(E.r0 + f * 3) + cell; x.beginPath(); x.moveTo(cx(E.cmin), Y); x.lineTo(cx(E.cmax) + cell, Y); x.stroke(); }
-    }
+  for (let r = 0; r < G.rows; r++) for (let c = 0; c < G.cols; c++) {
+    const b = G.band[r * G.cols + c]; const t = PSA.BAND_TONES[b];
+    x.fillStyle = `rgb(${t},${t},${t})`; x.fillRect(cx(c), cy(r), cell + 0.5, cell + 0.5);
   }
-  if (!res.features.empty) drawOverlay(x, item, cell, cx, cy);
+  if (!res.features.empty) {
+    const hp = hatchPattern(x, 'rgba(30,30,30,0.9)', 45, 7);
+    res.features.pockets.forEach(p => { x.fillStyle = 'rgba(238,238,238,0.85)'; p.cells.forEach(([c, r]) => x.fillRect(cx(c), cy(r), cell + 0.5, cell + 0.5)); x.fillStyle = hp; p.cells.forEach(([c, r]) => x.fillRect(cx(c), cy(r), cell + 0.5, cell + 0.5)); });
+    const E = res.features.envelope, Mo = res.features.modules;
+    x.strokeStyle = 'rgba(0,0,0,0.25)'; x.lineWidth = 1;
+    for (let m = 0; m <= Mo.nm; m++) { const X = cx(Mo.mo + m * 9); x.beginPath(); x.moveTo(X, cy(E.rmax)); x.lineTo(X, cy(E.r0) + cell); x.stroke(); }
+    for (let f = 0; f <= Mo.nf; f++) { const Y = cy(E.r0 + f * 3) + cell; x.beginPath(); x.moveTo(cx(E.cmin), Y); x.lineTo(cx(E.cmax) + cell, Y); x.stroke(); }
+    drawOverlay(x, item, cell, cx, cy);
+  }
 }
 // double stroke so the overlay reads over black cubes and white void alike
 function dline(x, pts, w = 2, close = false) {
@@ -380,9 +387,11 @@ window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
 // ------------------------------------------------------------------ boot
 function boot() {
   $$('.picker').forEach(wirePicker);
-  $('#viewImage').onclick = () => { A.view = 'image'; $('#viewImage').classList.add('on'); $('#viewDiagram').classList.remove('on'); if (A.item) drawView(A.item); };
-  $('#viewDiagram').onclick = () => { A.view = 'diagram'; $('#viewDiagram').classList.add('on'); $('#viewImage').classList.remove('on'); if (A.item) drawView(A.item); };
+  try { A.depth = localStorage.getItem('protospace.depth') === '1'; } catch (e) {}
+  const dt = $('#depthToggle'); dt.checked = A.depth; $('#depthWrap').hidden = !A.depth;
+  dt.addEventListener('change', () => { A.depth = dt.checked; $('#depthWrap').hidden = !A.depth; try { localStorage.setItem('protospace.depth', A.depth ? '1' : '0'); } catch (e) {} if (A.item) drawView(A.item); });
   window.addEventListener('resize', () => { if (A.item && A.tab === 'analyze') drawView(A.item); });
+  A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'camera', color: 'render', ratio: 0.5, emptyText: 'Pick an animation and a frame above.' });
   A.model = createViewer($('#model3dViewer'), { panel: 'side', sections: ['look', 'crop', 'cut', 'export'], open: { look: true, crop: true, cut: false, export: false }, emptyText: 'Pick an animation and a frame above to see its 3D model.', onBox: rateBox });
   PSGen.mount({
     analyze: (vox, thr) => analyzeVox(vox, thr),

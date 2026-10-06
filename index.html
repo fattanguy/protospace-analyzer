@@ -67,17 +67,16 @@
     </div>
     <p class="status num pick-status"></p>
 
+    <div class="quads">
+      <span class="lbl">Rate</span>
+      <div class="quad-btns" id="quadButtons" role="group" aria-label="Part of the frame to rate"></div>
+      <span class="hint">Pick a square of the frame (two 9 m bays) or the whole frame.</span>
+    </div>
+    <div id="anViewer"></div>
+    <label class="chk"><input type="checkbox" id="depthToggle"> Depth diagram · the flat reading behind the ratings, with what the selected rating looks at drawn on it</label>
+    <div class="canvasWrap" id="depthWrap" hidden><canvas id="view" width="900" height="560" aria-label="The depth diagram of the frame with the reading drawn over it"></canvas></div>
+
     <div class="bench" id="bench">
-      <div class="viewer">
-        <div class="viewbar">
-          <div class="seg" role="group" aria-label="Drawing">
-            <button type="button" id="viewImage" class="on">Elevation</button>
-            <button type="button" id="viewDiagram">Depth map</button>
-          </div>
-          <span class="hint">Select a rating on the right to see what it looks at in the drawing.</span>
-        </div>
-        <div class="canvasWrap"><canvas id="view" width="900" height="560" aria-label="The frame, seen from the front, with the reading drawn over it"></canvas></div>
-      </div>
       <aside class="ratings" aria-label="Ratings">
         <h2>Ratings · 0 to 100</h2>
         <div id="ratings"></div>
@@ -139,7 +138,7 @@
         <summary>How the frame is read</summary>
         <div class="method">
           <div>
-            <p>The frame is looked at from the front. Every metre of the face is classed by how deep its first cube sits: black at the front, grey a few metres back, light grey deep inside, white where you see straight through. Modules are 9 m wide and 3 m tall; the module grid is placed where the full/empty reading is clearest. 1 cube = 1 m.</p>
+            <p>The frame is looked at from the front through the render camera. Every metre of the face is classed by how deep its first cube sits: black at the front, grey a few metres back, light grey deep inside, white where you see straight through. Modules are 9 m wide and 3 m tall; the module grid is placed where the full/empty reading is clearest. 1 cube = 1 m.</p>
             <p>Scores describe fit to this project's targets, not architectural quality. They are a tool for comparing frames, not a verdict.</p>
           </div>
           <div>

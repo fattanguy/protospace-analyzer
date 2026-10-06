@@ -20,17 +20,19 @@ Live at the Vercel deployment of this repository.
   video, and the Blender settings file. The twelve ratings of the frame on screen update
   live.
 - **Analyze** — pick an animation (what is on screen in the Generator, the built-in Blender
-  scene and Noise loop, or any animation you saved) and a frame. The drawing shows the frame
-  from the front (elevation or depth map) with the reading behind the selected rating drawn
-  over it; each rating has a one-line question, a score, what the frame shows, what was
-  measured and how to raise it. The full rubric-v3 assessment (editable interpretation,
-  combined score, JSON download) and the method notes are folded away underneath.
+  scene and Noise loop, or any animation you saved) and a frame. The actual frame is shown
+  through the render camera in the studio-render look; pick a square of it (two 9 m bays)
+  or the whole frame to rate, and tick *Depth diagram* to see the flat reading behind the
+  ratings with what the selected rating looks at drawn on it. Each rating has a one-line
+  question, a score, what the frame shows, what was measured and how to raise it. The full
+  rubric-v3 assessment (editable interpretation, combined score, JSON download) and the
+  method notes are folded away underneath.
 - **3D model** — the same frame as a model. Orbit, preset views, the render camera,
-  turntable; **crop box** — tick it, drag the arrows on the box (or use the sliders) and
-  everything outside the box is cut away, with the twelve ratings of what is inside the box
-  underneath; section and plan cuts; colour by depth, studio render, white model, cube size,
-  spaces or levels; export PNG, turntable video, OBJ, GLB or STL (the cropped part when the
-  box is on).
+  turntable; **crop box** — tick it and a cube appears: drag it with the mouse to move it
+  around the slab (the green arrow lifts it), make it bigger or smaller, and everything
+  outside it is cut away, with the twelve ratings of what is inside the box underneath;
+  section and plan cuts; colour by depth, studio render, white model, cube size, spaces or
+  levels; export PNG, turntable video, OBJ, GLB or STL (the cropped part when the box is on).
 
 ## The field
 

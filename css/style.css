@@ -74,9 +74,10 @@
   .m3d-sections .legend { margin-top: 8px; font-size: 12px; }
   .m3d-sections .legend .sw { border-color: var(--rule); }
   .m3d-sections .hint { font-size: 12px; }
-  .m3d-axis { border-top: 1px dashed var(--rule); padding-top: 6px; margin-top: 6px; }
-  .m3d-axis > span { display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink3); }
-  .m3d-axis label { margin: 4px 0; }
+  .m3d-size { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 6px 8px; align-items: center; margin: 8px 0; }
+  .m3d-size .btn { padding: 4px 10px; font-size: 14px; line-height: 1; }
+  .m3d-size input[type=range] { width: 100%; margin: 0; }
+  .m3d-size output { grid-column: 1 / -1; font-size: 12px; color: var(--ink2); text-align: center; }
   .m3d-exports { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
   .m3d-exports .btn { width: 100%; }
   .m3d-exports .btn.on { background: var(--ink); color: var(--bg); }
@@ -153,7 +154,17 @@
   .pick-tools .btn { padding: 6px 10px; font-size: 11px; }
 
   /* ░░ Analyze ░░ */
-  .bench { display: grid; grid-template-columns: 1fr; gap: 22px; align-items: start; margin-top: 16px; }
+  .quads { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 14px 0 12px; }
+  .quads .lbl { font-size: 13px; color: var(--ink2); }
+  .quads > .hint { flex-basis: 100%; margin: 0; }
+  .quad-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .quad-btns .btn { padding: 5px 9px; font-size: 11px; }
+  .quad-btns .btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .chk { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink2); margin: 12px 0 8px; cursor: pointer; }
+  .chk input { width: 15px; height: 15px; margin: 0; }
+  #anViewer .m3d { gap: 0; }
+  #anViewer [data-v="info"], #anViewer [data-v="stats"] { display: none; }
+  .bench { display: grid; grid-template-columns: 1fr; gap: 22px; align-items: start; margin-top: 18px; }
   #ratings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 0 36px; }
   .viewer { min-width: 0; }
   .viewbar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 10px; }
