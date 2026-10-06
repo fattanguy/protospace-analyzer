@@ -54,7 +54,7 @@ function voxGrid(vox, thr, box) {
 function analyzeVox(vox, thr, box) { const grid = voxGrid(vox, thr, box); return { grid, result: PSA.analyze(grid) }; }
 // ------------------------------------------------------------------ state
 const A = { animId: 'current', frame: 61, item: null, word: 'Modular', win: null, depth: false, token: 0, dirty: false, tab: 'generator', model: null, anv: null, boxTimer: null,
-  bay: null, hl: 'solids', progDepth: false, progWord: 'Modular', pv: null, scan: null };
+  bay: null, hl: 'none', progDepth: false, progWord: 'Modular', pv: null, scan: null };
 // the five bays of a frame (the same ones the Program tab rates): equal parts across the slab, the full height and depth
 function winBox(vox, i) { if (i == null) return null; const b = bayBoxes(vox)[i]; return b ? { x0: b.x0, x1: b.x1, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz } : null; }
 function winLabel(vox, i) { return i == null ? 'the whole frame' : `bay ${i + 1}`; }
@@ -398,7 +398,7 @@ function renderProgram() {
   const b = bays[A.bay];
   $('#progBayTitle').textContent = `Bay ${b.i + 1} · ${b.box.x0}–${b.box.x1} m along the slab · ${it.name}`;
   const src = { name: `${it.name} · bay ${b.i + 1}`, frame: it.frame, vox: it.vox, camera: it.camera, result: it.result };
-  if (A.pv) { A.pv.setSource(src, b.box); A.pv.setHighlight(highlightCells(it.vox, THR, b.box, A.hl, b.result)); if (!A.pvZoomed || A.pvZoomedBay !== b.i) { A.pv.zoomToBox(); A.pvZoomed = true; A.pvZoomedBay = b.i; } }
+  if (A.pv) { A.pv.setSource(src, b.box); A.pv.setHighlight(highlightCells(it.vox, THR, b.box, A.hl, b.result), hlOpts()); if (!A.pvZoomed || A.pvZoomedBay !== b.i) { A.pv.zoomToBox(); A.pvZoomed = true; A.pvZoomedBay = b.i; } }
   $('#progScores').innerHTML = PROGRAM_KEYS.map(k => { const p = b.programs[k], P = PROGRAMS[k], isBest = best[k] === b.i; return `<div class="prog-card${isBest ? ' best' : ''}"><div class="head"><span class="name">${P.name}${isBest ? '<small>best bay for this</small>' : ''}</span><b class="${isBest ? 'red' : ''}">${p.score}</b></div><p class="blurb">${P.blurb}</p><div class="half">From the ratings · ${p.wordScore}</div><div class="parts">${p.words.map(w => `<div class="part"><span>${w.word} <small>× ${Math.round(w.weight * 100)}%</small></span><span class="track"><span class="bar" style="width:${w.value}%"></span></span><span class="num">${w.value}</span></div>`).join('')}</div><div class="half">From the cubes · ${p.measureScore}</div><div class="parts">${p.parts.map(q => `<div class="part"><span>${q.label} <small>× ${Math.round(q.weight * 100)}%</small></span><span class="track"><span class="bar" style="width:${Math.round(q.value * 100)}%"></span></span><span class="num">${Math.round(q.value * 100)}</span></div>`).join('')}</div></div>`; }).join('');
   const m = b.measures, pct = v => Math.round(v * 100) + '%';
   $('#progMeasures').innerHTML = [['Solid cubes', pct(m.solidShare)], ['Empty cubes', pct(m.voidShare)], ['Floor with headroom', m.floor + ' m²'], ['Sheltered floor', pct(m.coveredShare) + ' of it'], ['Roofed hall at the ground', m.hall + ' m²'], ['Open ground', pct(m.groundVoid)], ['See-through columns', pct(m.seeThrough)], ['Mass at the front', pct(m.frontMass)], ['Gathering pockets', m.pockets], ['Streets', m.streets], ['Openings', m.openings]].map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join('');
@@ -408,6 +408,7 @@ function renderProgram() {
   renderProgWords(b);
   if (A.progDepth) drawDiagram($('#progView'), b.grid, b.result, A.progWord, '#c62828');
 }
+const hlOpts = () => ({ opacity: A.hl === 'voids' ? 0.28 : A.hl === 'seeThrough' || A.hl === 'ground' ? 0.4 : 0.55 });
 function renderProgWords(b) {
   const el = $('#progWords');
   el.innerHTML = WORDS.map(w => `<button type="button" class="btn quiet${w === A.progWord ? ' on' : ''}" data-word="${w}">${w} · ${b.result.ratings[w] ?? '—'}</button>`).join('');
@@ -468,7 +469,7 @@ function boot() {
   A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'camera', color: 'render', ratio: 0.5, emptyText: 'Pick an animation and a frame above.' });
   A.pv = createViewer($('#progViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'iso', color: 'foam', ratio: 0.62, emptyText: 'Pick an animation and a frame above.' });
   const hs = $('#progHl'); hs.innerHTML = HIGHLIGHTS.map(([k, t]) => `<option value="${k}">${t}</option>`).join(''); hs.value = A.hl;
-  hs.addEventListener('change', () => { A.hl = hs.value; if (A.item && A.item.bays && A.pv) { const b = A.item.bays[A.bay]; A.pv.setHighlight(highlightCells(A.item.vox, THR, b.box, A.hl, b.result)); } });
+  hs.addEventListener('change', () => { A.hl = hs.value; if (A.item && A.item.bays && A.pv) { const b = A.item.bays[A.bay]; A.pv.setHighlight(highlightCells(A.item.vox, THR, b.box, A.hl, b.result), hlOpts()); } });
   const pd = $('#progDepth'); pd.addEventListener('change', () => { A.progDepth = pd.checked; $('#progDepthWrap').hidden = !A.progDepth; if (A.progDepth && A.item && A.item.bays) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
   $('#progScanGo').addEventListener('click', scanAnimation);
   $('#progScanStop').addEventListener('click', () => { if (A.scan) A.scan.stop = true; });

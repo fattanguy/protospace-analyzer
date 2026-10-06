@@ -112,8 +112,10 @@ export function highlightCells(vox, thr, b, kind, result) {
   const solidAt = (x, y, z) => y >= 0 && y < ny && z >= 0 && z < nz && sizes[idx(x, y, z)] >= thr;
   const out = [];
   const eachCol = fn => { for (let x = b.x0; x < b.x1; x++) for (let z = 0; z < nz; z++) fn(x, z); };
+  if (kind === 'none') return out;
   if (kind === 'solids') { eachCol((x, z) => { for (let y = 0; y < ny; y++) if (solidAt(x, y, z)) out.push([x, y, z]); }); return out; }
-  if (kind === 'voids') {                                                     // empty cubes with mass on three or more of their six sides
+  if (kind === 'voids') { eachCol((x, z) => { for (let y = 0; y < ny; y++) if (!solidAt(x, y, z)) out.push([x, y, z]); }); return out; }   // every empty cube of the bay
+  if (kind === 'enclosed') {                                                  // empty cubes with mass on three or more of their six sides
     const sAt = (x, y, z) => x >= 0 && x < nx && solidAt(x, y, z);
     eachCol((x, z) => { for (let y = 0; y < ny; y++) { if (solidAt(x, y, z)) continue; const n = sAt(x - 1, y, z) + sAt(x + 1, y, z) + sAt(x, y - 1, z) + sAt(x, y + 1, z) + sAt(x, y, z - 1) + sAt(x, y, z + 1); if (n >= 3) out.push([x, y, z]); } });
     return out;
@@ -140,7 +142,7 @@ export function highlightCells(vox, thr, b, kind, result) {
   return out;
 }
 export const HIGHLIGHTS = [
-  ['solids', 'Solids · every cube of mass'], ['voids', 'Voids · empty cubes with mass on three or more sides'], ['floor', 'Floors · standing on mass with 3 m of headroom'],
+  ['none', 'Nothing'], ['solids', 'Solids · every cube of mass'], ['voids', 'Voids · all the empty space of the bay'], ['enclosed', 'Enclosed voids · empty cubes with mass on three or more sides'], ['floor', 'Floors · standing on mass with 3 m of headroom'],
   ['covered', 'Sheltered floors · floors with mass overhead'], ['hall', 'Roofed hall · ground with headroom and mass overhead'], ['ground', 'Open ground · the empty bottom 3 m'], ['seeThrough', 'See-through · columns with no mass at all'],
   ['pockets', 'Gathering pockets · recesses of 12 m² or more'], ['streets', 'Streets · floor-level recesses 5 m or longer'], ['openings', 'Openings · holes through the face'],
 ];
