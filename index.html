@@ -17,7 +17,7 @@
 <nav class="topbar" aria-label="Tabs">
   <a class="brand" href="#generator">ProtoSpace <span>Analyzer</span></a>
   <div class="links tabs" role="tablist">
-    <a href="#generator" data-tab="generator" role="tab">Generator</a><a href="#analyze" data-tab="analyze" role="tab">Analyze</a><a href="#model" data-tab="model" role="tab">3D model</a>
+    <a href="#generator" data-tab="generator" role="tab">Generator</a><a href="#analyze" data-tab="analyze" role="tab">Analyze</a><a href="#program" data-tab="program" role="tab">Program</a><a href="#model" data-tab="model" role="tab">3D model</a>
   </div>
 </nav>
 <div class="wrap" id="top">
@@ -155,6 +155,78 @@
         </div>
       </details>
     </section>
+  </section>
+</div>
+
+<!-- ░░ Program ░░ -->
+<div class="tab" data-tab="program" hidden>
+  <section id="program" aria-label="Program">
+    <div class="picker">
+      <label>Animation <select class="pick-anim" aria-label="Animation"></select></label>
+      <div class="pick-frames">
+        <span class="lbl">Frame</span>
+        <button type="button" class="btn quiet pick-prev" aria-label="Previous frame">‹</button>
+        <input class="pick-frame" type="range" min="1" max="250" step="1" value="1" aria-label="Frame">
+        <button type="button" class="btn quiet pick-next" aria-label="Next frame">›</button>
+        <input class="pick-frameNumber num" type="number" min="1" max="250" value="1" aria-label="Frame number">
+        <output class="pick-frameOut num hint"></output>
+      </div>
+      <div class="pick-tools">
+        <button type="button" class="btn quiet pick-open" title="Open this animation and frame in the Generator">Open in Generator</button>
+        <button type="button" class="btn quiet pick-delete" hidden>Delete</button>
+      </div>
+    </div>
+    <p class="status num pick-status"></p>
+    <p class="hint prog-intro">Every 9 m bay of this frame is rated on all twelve descriptors and on its own cubes, then scored for three uses. The best bay for each use is picked out; select any bay for its deep analysis.</p>
+    <div class="prog-winners" id="progWinners"></div>
+    <div class="prog-bays" id="progBays"></div>
+
+    <div class="prog-deep">
+      <div class="prog-left">
+        <div class="prog-tools">
+          <h2 class="eyebrow" id="progBayTitle">Bay</h2>
+          <label class="prog-hl">Show in red <select id="progHl"></select></label>
+        </div>
+        <div id="progViewer"></div>
+        <label class="chk"><input type="checkbox" id="progDepth"> Depth diagram of this bay · what the selected rating looks at, in red</label>
+        <div id="progDepthWrap" hidden>
+          <div class="quads"><span class="lbl">Rating</span><div class="quad-btns" id="progWords"></div></div>
+          <div class="canvasWrap"><canvas id="progView" width="400" height="500" aria-label="Depth diagram of the bay with the reading drawn in red"></canvas></div>
+        </div>
+      </div>
+      <aside class="prog-right">
+        <div id="progScores"></div>
+        <h3 class="eyebrow">Counted from the cubes</h3>
+        <div id="progMeasures" class="prog-measures"></div>
+        <h3 class="eyebrow">The twelve ratings of this bay</h3>
+        <p class="hint" id="progRatingsNote"></p>
+        <div id="progRatings" class="gen-ratings one"></div>
+      </aside>
+    </div>
+
+    <details class="more" id="progScan">
+      <summary>Scan the whole animation · the best bay of any frame</summary>
+      <div class="prog-scanbar">
+        <label>Every <select id="progStep"><option value="5">5</option><option value="10" selected>10</option><option value="25">25</option><option value="50">50</option></select> frames</label>
+        <button type="button" class="btn" id="progScanGo">Scan</button>
+        <button type="button" class="btn quiet" id="progScanStop" hidden>Stop</button>
+        <span class="hint" id="progScanStatus">Rates every bay of every sampled frame and keeps the best for each use.</span>
+      </div>
+      <div class="prog-results" id="progResults"></div>
+    </details>
+
+    <details class="more">
+      <summary>How bays are rated</summary>
+      <div class="method">
+        <div>
+          <p>A bay is one module wide (9 m), the full height and the full depth of the slab. Each bay gets the twelve descriptor ratings from its own depth reading (the same analyzer as the Analyze tab), and a handful of counts straight from its cubes: solid cubes, floors (empty cubes standing on mass with 3 m of headroom), sheltered floors (mass somewhere overhead), a roofed hall at the ground, open ground, see-through columns, and the pockets, streets and openings of its face.</p>
+          <p>Each use is a 0–100 score: 60 % from the descriptors that matter for it, 40 % from the counts. <strong>Lobby</strong> wants Porous, Visually Connected, Networked, Socially Interactive and Layered, plus a roofed hall at the ground, open ground and an open (not stuffed) bay. <strong>Gathering</strong> wants Socially Interactive, Decentralized, Clustered, Village-Like, Intimate and Layered, plus sheltered floor, gathering pockets and floor with headroom. <strong>Working</strong> wants Modular, Intimate, Clustered, Layered and Interlocking, plus floor with headroom, enough mass to make rooms (30–60 % solid) and enclosure (few see-through columns).</p>
+        </div>
+        <div>
+          <p>The red in the model marks exactly what a reading counts — every cube of mass, the voids with mass on three or more sides, the floors, the sheltered floors, the roofed hall, the open ground, the see-through columns, or the pockets, streets and openings of the face — so you can check the count against what you see. The scores describe fit to these simple rules, not whether a design is good; use them to compare bays and frames.</p>
+        </div>
+      </div>
+    </details>
   </section>
 </div>
 

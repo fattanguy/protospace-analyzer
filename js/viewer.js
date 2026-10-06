@@ -125,7 +125,7 @@ export function createViewer(root, opts = {}) {
   // ------------------------------------------------------------------ state
   const M = {
     ready: false, el: root, renderer: null, scene: null, camera: null, controls: null, gizmo: null, pivot: null,
-    source: null, cells: null, mesh: null, base: null, boxLines: null, boxFill: null, planes: {}, light: null, fill: null, hemi: null,
+    source: null, cells: null, mesh: null, base: null, hl: null, hlCells: null, boxLines: null, boxFill: null, planes: {}, light: null, fill: null, hemi: null,
     bbox: null, raf: null, visible: true, pending: null, viewName: opts.view || 'iso', recording: null, lastKey: '', boxTimer: null,
     box: { on: false, outline: false, size: 24, x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 },
     settings: { style: 'cubes', sizes: 'actual', color: opts.color || 'depth', shadows: true, section: false, sectionX: 0, sectionFlip: false, plan: false, planY: 0, planFlip: false, turntable: false },
@@ -395,6 +395,23 @@ export function createViewer(root, opts = {}) {
     return geo;
   }
 
+  /* Red cubes over the model: the cells a reading lights up (the Program tab). cells = [[x, y, z], ...] or null. */
+  function setHighlight(cells, o = {}) {
+    M.hlCells = cells && cells.length ? cells : null; M.hlOpts = o;
+    buildHighlight();
+  }
+  function buildHighlight() {
+    if (M.hl) { M.scene.remove(M.hl); M.hl.geometry.dispose(); M.hl.material.dispose(); M.hl = null; }
+    const cells = M.hlCells; if (!cells || !M.source || !M.source.vox) return;
+    const o = M.hlOpts || {};
+    const mesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: o.color ?? 0xc62828, transparent: true, opacity: o.opacity ?? 0.55, depthWrite: false }), cells.length);
+    const m = new THREE.Matrix4(), sc = o.scale ?? 1.0;
+    for (let i = 0; i < cells.length; i++) { const c = cells[i]; m.makeScale(sc, sc, sc); m.setPosition(c[0] + 0.5, c[1] + 0.5, -(c[2] + 0.5)); mesh.setMatrixAt(i, m); }
+    mesh.instanceMatrix.needsUpdate = true; mesh.renderOrder = 1; mesh.name = 'highlight';
+    M.scene.add(mesh); M.hl = mesh;
+    applyClipping();
+  }
+
   function clear() {
     for (const k of ['mesh', 'base']) { const o = M[k]; if (!o) continue; M.scene.remove(o); if (o.geometry) o.geometry.dispose(); if (o.material && o.material.dispose) o.material.dispose(); M[k] = null; }
   }
@@ -407,6 +424,7 @@ export function createViewer(root, opts = {}) {
       empty.hidden = false; empty.innerHTML = (M.source && M.source.message) || opts.emptyText || 'Pick a frame to see its 3D model.';
       stats.textContent = ''; info.textContent = ''; M.planes.section.visible = M.planes.plan.visible = false; M.bbox = null; M.cells = null;
       M.boxLines.visible = M.boxFill.visible = false; if (M.gizmo) { M.gizmo.enabled = false; M.gizmo.getHelper().visible = false; }
+      if (M.hl) { M.scene.remove(M.hl); M.hl = null; }
       return;
     }
     const C = computeCells(); M.cells = C;
@@ -448,7 +466,7 @@ export function createViewer(root, opts = {}) {
       if (+sy.value > v.ny || sy.dataset.fresh !== '0') { sy.value = Math.round(v.ny / 2); sy.dataset.fresh = '0'; }
       s.sectionX = +sx.value; s.planY = +sy.value;
     }
-    syncBoxControls(); applyClipping(); drawBox();
+    syncBoxControls(); buildHighlight(); applyClipping(); drawBox();
     const what = b.on && !b.outline ? `box ${b.x1 - b.x0} × ${b.y1 - b.y0} m, ${b.z1 - b.z0} m deep` : `${v.nx} × ${v.ny} m slab, ${depth} m deep`;
     stats.textContent = `${M.source.name} · ${what} · ${fmtN(C.solidCount)} solid cubes${s.style === 'cubes' && cubeCount ? ` (${fmtN(cubeCount)} drawn)` : ''} · ${fmtN(tris)} triangles`;
     info.textContent = C.cells.length ? 'Click a cube for its reading.' : '';
@@ -476,7 +494,7 @@ export function createViewer(root, opts = {}) {
         new THREE.Plane(new THREE.Vector3(0, 1, 0), -b.y0), new THREE.Plane(new THREE.Vector3(0, -1, 0), b.y1),
         new THREE.Plane(new THREE.Vector3(0, 0, 1), b.z1), new THREE.Plane(new THREE.Vector3(0, 0, -1), -b.z0));
     }
-    if (M.mesh) { M.mesh.material.clippingPlanes = planes; M.mesh.material.needsUpdate = true; }
+    for (const o of [M.mesh, M.hl]) if (o) { o.material.clippingPlanes = planes; o.material.needsUpdate = true; }
     const sxl = V('sectionX'); if (sxl) { sxl.parentElement.hidden = !s.section; V('sectionValue').textContent = s.sectionX + ' m'; }
     const syl = V('planY'); if (syl) { syl.parentElement.hidden = !s.plan; V('planValue').textContent = s.planY + ' m'; }
   }
@@ -677,7 +695,7 @@ export function createViewer(root, opts = {}) {
     put('style', 'style'); put('sizes', 'sizes'); put('color', 'color'); put('shadows', 'shadows');
   }
 
-  Object.assign(api, { setSource, setBox, view, rebuild, snapshot, exportOBJ, exportSTL, exportGLB, recordTurn, resize, get ready() { return M.ready; }, get box() { return M.box.on ? Object.assign({}, M.box) : null; }, settings: M.settings, el: root, V });
+  Object.assign(api, { setSource, setBox, setHighlight, zoomToBox, view, rebuild, snapshot, exportOBJ, exportSTL, exportGLB, recordTurn, resize, get ready() { return M.ready; }, get box() { return M.box.on ? Object.assign({}, M.box) : null; }, settings: M.settings, el: root, V });
   init();
   return api;
 }

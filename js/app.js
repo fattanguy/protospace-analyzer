@@ -6,6 +6,7 @@
 
 import { PSGen } from './generator.js';
 import { createViewer } from './viewer.js';
+import { bayBoxes, measureBay, programScores, highlightCells, HIGHLIGHTS, PROGRAMS, PROGRAM_KEYS, MEASURE_NAMES } from './program.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -52,7 +53,8 @@ function voxGrid(vox, thr, box) {
 }
 function analyzeVox(vox, thr, box) { const grid = voxGrid(vox, thr, box); return { grid, result: PSA.analyze(grid) }; }
 // ------------------------------------------------------------------ state
-const A = { animId: 'current', frame: 61, item: null, word: 'Modular', win: null, depth: false, token: 0, dirty: false, tab: 'generator', model: null, anv: null, boxTimer: null };
+const A = { animId: 'current', frame: 61, item: null, word: 'Modular', win: null, depth: false, token: 0, dirty: false, tab: 'generator', model: null, anv: null, boxTimer: null,
+  bay: null, hl: 'solids', progDepth: false, progWord: 'Modular', pv: null, scan: null };
 const BAY = 9, WIN_BAYS = 2;                                                  // a quadrant = two 9 m bays, the full height and depth
 function nBays(nx) { return Math.ceil(nx / BAY); }
 function winBox(vox, i) { if (i == null) return null; const x0 = i * BAY, x1 = Math.min(vox.nx, (i + WIN_BAYS) * BAY); return { x0, x1, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz }; }
@@ -129,6 +131,7 @@ function renderAll() {
   const src = { name: it.name, frame: it.frame, vox: it.vox, camera: it.camera, result: it.result };
   if (A.anv) A.anv.setSource(src, it.box ? Object.assign({ outline: true }, it.box) : null);
   if (A.model) { A.model.setSource(src); rateBox(A.model.box); }
+  it.bays = null; if (A.tab === 'program') renderProgram();
 }
 function renderQuads() {
   const el = $('#quadButtons'), it = A.item; if (!el || !it) return;
@@ -217,9 +220,12 @@ function hatchPattern(ctx, color, angle, spacing) {
   x.stroke();
   return ctx.createPattern(c, 'repeat');
 }
-function drawView(item) {
-  const cv = $('#view'), R = item.R, G = item.grid, res = item.result;
-  if (!A.depth || !cv.parentElement.clientWidth) return;                       // diagram off, or tab hidden
+let INK = '#111';                                                              // the overlay colour (red in the Program tab)
+function drawView(item) { if (A.depth) drawDiagram($('#view'), item.grid, item.result, A.word, '#111'); }
+function drawDiagram(cv, G, res, word, ink) {
+  const R = { x0: 0, y0: 0, x1: G.cols * CELL, y1: G.rows * CELL };
+  if (!cv.parentElement.clientWidth) return;                                   // hidden
+  INK = ink;
   const maxW = cv.parentElement.clientWidth || 900;
   const rw = R.x1 - R.x0, rh = R.y1 - R.y0;
   const k = Math.min(maxW / rw, 620 / rh, 22 / CELL);
@@ -241,21 +247,21 @@ function drawView(item) {
     x.strokeStyle = 'rgba(0,0,0,0.25)'; x.lineWidth = 1;
     for (let m = 0; m <= Mo.nm; m++) { const X = cx(Mo.mo + m * 9); x.beginPath(); x.moveTo(X, cy(E.rmax)); x.lineTo(X, cy(E.r0) + cell); x.stroke(); }
     for (let f = 0; f <= Mo.nf; f++) { const Y = cy(E.r0 + f * 3) + cell; x.beginPath(); x.moveTo(cx(E.cmin), Y); x.lineTo(cx(E.cmax) + cell, Y); x.stroke(); }
-    drawOverlay(x, item, cell, cx, cy);
+    drawOverlay(x, { grid: G, result: res }, word, cell, cx, cy);
   }
 }
 // double stroke so the overlay reads over black cubes and white void alike
 function dline(x, pts, w = 2, close = false) {
   x.beginPath(); pts.forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); if (close) x.closePath();
   x.lineWidth = w + 3; x.strokeStyle = 'rgba(255,255,255,0.95)'; x.stroke();
-  x.lineWidth = w; x.strokeStyle = '#111'; x.stroke();
+  x.lineWidth = w; x.strokeStyle = INK; x.stroke();
 }
 function label(x, X, Y, text, size = 12) {
   x.font = `600 ${size}px Poppins, system-ui, sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
   const w = x.measureText(text).width + 10;
   x.fillStyle = 'rgba(255,255,255,0.92)'; x.fillRect(X - w / 2, Y - size * 0.75, w, size * 1.5);
-  x.strokeStyle = '#111'; x.lineWidth = 1; x.strokeRect(X - w / 2, Y - size * 0.75, w, size * 1.5);
-  x.fillStyle = '#111'; x.fillText(text, X, Y + 0.5);
+  x.strokeStyle = INK; x.lineWidth = 1; x.strokeRect(X - w / 2, Y - size * 0.75, w, size * 1.5);
+  x.fillStyle = INK; x.fillText(text, X, Y + 0.5);
 }
 function cellOutline(x, cells, cell, cx, cy, w = 2) {
   const set = new Set(cells.map(([c, r]) => c + ',' + r));
@@ -271,10 +277,10 @@ function cellOutline(x, cells, cell, cx, cy, w = 2) {
   segs.forEach(s => dline(x, s, w));
 }
 function moduleCells(mo, r0, m, f) { const out = []; for (let dc = 0; dc < 9; dc++) for (let dr = 0; dr < 3; dr++) out.push([mo + m * 9 + dc, r0 + f * 3 + dr]); return out; }
-function drawOverlay(x, item, cell, cx, cy) {
-  const F = item.result.features, w = A.word, Mo = F.modules, E = F.envelope;
+function drawOverlay(x, item, w, cell, cx, cy) {
+  const F = item.result.features, Mo = F.modules, E = F.envelope;
   const mc = (m, f) => [cx(Mo.mo + m * 9) + 4.5 * cell, cy(E.r0 + f * 3) - 0.5 * cell + cell];
-  const hp = hatchPattern(x, 'rgba(20,20,20,0.85)', 45, 7), hp2 = hatchPattern(x, 'rgba(20,20,20,0.6)', 135, 7);
+  const hp = hatchPattern(x, INK === '#111' ? 'rgba(20,20,20,0.85)' : 'rgba(198,40,40,0.85)', 45, 7), hp2 = hatchPattern(x, INK === '#111' ? 'rgba(20,20,20,0.6)' : 'rgba(198,40,40,0.6)', 135, 7);
   const fillCells = (cells, style) => { x.fillStyle = style; cells.forEach(([c, r]) => x.fillRect(cx(c), cy(r), cell + 0.5, cell + 0.5)); };
   const pale = (cells) => fillCells(cells, 'rgba(255,255,255,0.55)');
   switch (w) {
@@ -292,8 +298,8 @@ function drawOverlay(x, item, cell, cx, cy) {
       break;
     }
     case 'Interlocking': {
-      F.connections.forEach(cn => { const a = mc(...cn.a), b = mc(...cn.b); dline(x, [a, b], cn.lock ? 3.5 : 1.5); if (cn.lock) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; x.fillStyle = '#fff'; x.fillRect(m[0] - 5, m[1] - 5, 10, 10); x.strokeStyle = '#111'; x.lineWidth = 2; x.strokeRect(m[0] - 5, m[1] - 5, 10, 10); } });
-      for (let m = 0; m < Mo.nm; m++) for (let f = 0; f < Mo.nf; f++) if (Mo.fill[f * Mo.nm + m] >= 0.5) { const p = mc(m, f); x.fillStyle = '#111'; x.beginPath(); x.arc(p[0], p[1], 4, 0, 7); x.fill(); x.strokeStyle = '#fff'; x.lineWidth = 1.5; x.stroke(); }
+      F.connections.forEach(cn => { const a = mc(...cn.a), b = mc(...cn.b); dline(x, [a, b], cn.lock ? 3.5 : 1.5); if (cn.lock) { const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; x.fillStyle = '#fff'; x.fillRect(m[0] - 5, m[1] - 5, 10, 10); x.strokeStyle = INK; x.lineWidth = 2; x.strokeRect(m[0] - 5, m[1] - 5, 10, 10); } });
+      for (let m = 0; m < Mo.nm; m++) for (let f = 0; f < Mo.nf; f++) if (Mo.fill[f * Mo.nm + m] >= 0.5) { const p = mc(m, f); x.fillStyle = INK; x.beginPath(); x.arc(p[0], p[1], 4, 0, 7); x.fill(); x.strokeStyle = '#fff'; x.lineWidth = 1.5; x.stroke(); }
       break;
     }
     case 'Porous': {
@@ -309,7 +315,7 @@ function drawOverlay(x, item, cell, cx, cy) {
     }
     case 'Decentralized': {
       F.pockets.forEach(k => { pale(k.cells); fillCells(k.cells, hp); cellOutline(x, k.cells, cell, cx, cy, 1.5); });
-      F.distLines.forEach(l => { const a = [cx(l.from[0]), cy(l.from[1]) + cell], b = [cx(l.to[0]), cy(l.to[1]) + cell]; dline(x, [a, b], 1.2); x.fillStyle = '#111'; x.beginPath(); x.arc(a[0], a[1], 3.5, 0, 7); x.fill(); });
+      F.distLines.forEach(l => { const a = [cx(l.from[0]), cy(l.from[1]) + cell], b = [cx(l.to[0]), cy(l.to[1]) + cell]; dline(x, [a, b], 1.2); x.fillStyle = INK; x.beginPath(); x.arc(a[0], a[1], 3.5, 0, 7); x.fill(); });
       break;
     }
     case 'Networked': {
@@ -335,13 +341,13 @@ function drawOverlay(x, item, cell, cx, cy) {
       break;
     }
     case 'Visually Connected': {
-      F.rays.forEach(r => { const a = [cx(r.from[0]) + cell / 2, cy(r.from[1]) + cell / 2], b = [cx(r.to[0]) + cell / 2, cy(r.to[1]) + cell / 2]; dline(x, [a, b], 1.5); x.fillStyle = '#fff'; x.strokeStyle = '#111'; x.lineWidth = 1.5; x.beginPath(); x.arc(b[0], b[1], 4, 0, 7); x.fill(); x.stroke(); });
+      F.rays.forEach(r => { const a = [cx(r.from[0]) + cell / 2, cy(r.from[1]) + cell / 2], b = [cx(r.to[0]) + cell / 2, cy(r.to[1]) + cell / 2]; dline(x, [a, b], 1.5); x.fillStyle = '#fff'; x.strokeStyle = INK; x.lineWidth = 1.5; x.beginPath(); x.arc(b[0], b[1], 4, 0, 7); x.fill(); x.stroke(); });
       break;
     }
     case 'Socially Interactive': {
       F.pockets.forEach(k => { pale(k.cells); fillCells(k.cells, hp); cellOutline(x, k.cells, cell, cx, cy, 1.5); });
       F.streets.forEach(s => dline(x, [[cx(s.c0), cy(s.r) + cell / 2], [cx(s.c1) + cell, cy(s.r) + cell / 2]], 5));
-      F.contacts.forEach(ct => { const s = ct.street, k = F.pockets.find(p => p.id === ct.pocket); if (!k) return; const near = k.cells.filter(([c, r]) => Math.abs(r - s.r) <= 1 && c >= s.c0 - 1 && c <= s.c1 + 1); const p = near.reduce((a, c) => [a[0] + c[0], a[1] + c[1]], [0, 0]); const X = cx(p[0] / near.length) + cell / 2, Y = cy(p[1] / near.length) + cell / 2; x.fillStyle = '#fff'; x.strokeStyle = '#111'; x.lineWidth = 2.5; x.beginPath(); x.arc(X, Y, 8, 0, 7); x.fill(); x.stroke(); });
+      F.contacts.forEach(ct => { const s = ct.street, k = F.pockets.find(p => p.id === ct.pocket); if (!k) return; const near = k.cells.filter(([c, r]) => Math.abs(r - s.r) <= 1 && c >= s.c0 - 1 && c <= s.c1 + 1); const p = near.reduce((a, c) => [a[0] + c[0], a[1] + c[1]], [0, 0]); const X = cx(p[0] / near.length) + cell / 2, Y = cy(p[1] / near.length) + cell / 2; x.fillStyle = '#fff'; x.strokeStyle = INK; x.lineWidth = 2.5; x.beginPath(); x.arc(X, Y, 8, 0, 7); x.fill(); x.stroke(); });
       break;
     }
     case 'Village-Like': {
@@ -365,8 +371,78 @@ function rateBox(box) {
   el.innerHTML = WORDS.map(w => { const v = result.ratings[w]; return `<div class="gen-row"><span class="wd">${w}</span><span class="track"><span class="bar" style="width:${v ?? 0}%"></span></span><span class="num">${v == null ? '—' : v}</span></div>`; }).join('');
 }
 
+// ------------------------------------------------------------------ Program: every bay of the frame, rated for Lobby / Gathering / Working
+function rateBays(it) {
+  if (it.bays) return it.bays;
+  const bays = bayBoxes(it.vox).map(b => {
+    const { grid, result } = analyzeVox(it.vox, THR, b);
+    const measures = measureBay(it.vox, THR, b, result);
+    const programs = programScores(result.ratings, measures, result.features.empty);
+    return { i: b.i, box: b, grid, result, measures, programs };
+  });
+  const best = {};
+  for (const k of PROGRAM_KEYS) best[k] = bays.reduce((m, b) => (m == null || b.programs[k].score > bays[m].programs[k].score ? b.i : m), null);
+  it.bays = bays; it.best = best;
+  return bays;
+}
+function renderProgram() {
+  const it = A.item; if (!it) return;
+  const bays = rateBays(it), best = it.best;
+  if (A.bay == null || A.bay >= bays.length) A.bay = best.lobby ?? 0;
+  // the winners
+  $('#progWinners').innerHTML = PROGRAM_KEYS.map(k => { const b = bays[best[k]]; return `<button type="button" class="prog-win" data-bay="${b.i}"><div class="eyebrow">Best for ${PROGRAMS[k].name.toLowerCase()}</div><b>Bay ${b.i + 1} · ${b.programs[k].score}</b><small>${b.box.x0}–${b.box.x1} m along the slab · ${PROGRAMS[k].blurb}</small></button>`; }).join('');
+  $$('#progWinners .prog-win').forEach(el => el.onclick = () => { A.bay = +el.dataset.bay; renderProgram(); });
+  // the strip of bays
+  $('#progBays').innerHTML = bays.map(b => `<button type="button" class="prog-bay${b.i === A.bay ? ' on' : ''}" data-bay="${b.i}" title="Bay ${b.i + 1} · ${b.box.x0}–${b.box.x1} m"><div class="t"><span>Bay ${b.i + 1}</span>${PROGRAM_KEYS.filter(k => best[k] === b.i).map(k => `<em title="best for ${PROGRAMS[k].name.toLowerCase()}">${PROGRAMS[k].short}</em>`).join('')}</div>${PROGRAM_KEYS.map(k => `<div class="r"><span>${PROGRAMS[k].short}</span><span class="track"><span class="bar${best[k] === b.i ? ' best' : ''}" style="width:${b.programs[k].score}%"></span></span><span class="num">${b.programs[k].score}</span></div>`).join('')}</button>`).join('');
+  $$('#progBays .prog-bay').forEach(el => el.onclick = () => { A.bay = +el.dataset.bay; renderProgram(); });
+  const sel = $('#progBays .prog-bay.on'); if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  // the deep analysis of the selected bay
+  const b = bays[A.bay];
+  $('#progBayTitle').textContent = `Bay ${b.i + 1} · ${b.box.x0}–${b.box.x1} m along the slab · ${it.name}`;
+  const src = { name: `${it.name} · bay ${b.i + 1}`, frame: it.frame, vox: it.vox, camera: it.camera, result: it.result };
+  if (A.pv) { A.pv.setSource(src, b.box); A.pv.setHighlight(highlightCells(it.vox, THR, b.box, A.hl, b.result)); if (!A.pvZoomed || A.pvZoomedBay !== b.i) { A.pv.zoomToBox(); A.pvZoomed = true; A.pvZoomedBay = b.i; } }
+  $('#progScores').innerHTML = PROGRAM_KEYS.map(k => { const p = b.programs[k], P = PROGRAMS[k], isBest = best[k] === b.i; return `<div class="prog-card${isBest ? ' best' : ''}"><div class="head"><span class="name">${P.name}${isBest ? '<small>best bay for this</small>' : ''}</span><b class="${isBest ? 'red' : ''}">${p.score}</b></div><p class="blurb">${P.blurb}</p><div class="half">From the ratings · ${p.wordScore}</div><div class="parts">${p.words.map(w => `<div class="part"><span>${w.word} <small>× ${Math.round(w.weight * 100)}%</small></span><span class="track"><span class="bar" style="width:${w.value}%"></span></span><span class="num">${w.value}</span></div>`).join('')}</div><div class="half">From the cubes · ${p.measureScore}</div><div class="parts">${p.parts.map(q => `<div class="part"><span>${q.label} <small>× ${Math.round(q.weight * 100)}%</small></span><span class="track"><span class="bar" style="width:${Math.round(q.value * 100)}%"></span></span><span class="num">${Math.round(q.value * 100)}</span></div>`).join('')}</div></div>`; }).join('');
+  const m = b.measures, pct = v => Math.round(v * 100) + '%';
+  $('#progMeasures').innerHTML = [['Solid cubes', pct(m.solidShare)], ['Empty cubes', pct(m.voidShare)], ['Floor with headroom', m.floor + ' m²'], ['Sheltered floor', pct(m.coveredShare) + ' of it'], ['Roofed hall at the ground', m.hall + ' m²'], ['Open ground', pct(m.groundVoid)], ['See-through columns', pct(m.seeThrough)], ['Mass at the front', pct(m.frontMass)], ['Gathering pockets', m.pockets], ['Streets', m.streets], ['Openings', m.openings]].map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join('');
+  const top = PROGRAM_KEYS.reduce((m, k) => b.programs[k].score > b.programs[m].score ? k : m, 'lobby'), used = new Set(Object.keys(PROGRAMS[top].words));
+  $('#progRatingsNote').textContent = `Red bars feed the ${PROGRAMS[top].name.toLowerCase()} score, this bay's strongest use.`;
+  $('#progRatings').innerHTML = WORDS.map(w => { const v = b.result.ratings[w]; return `<div class="gen-row"><span class="wd">${w}</span><span class="track"><span class="bar${used.has(w) ? ' used' : ''}" style="width:${v ?? 0}%"></span></span><span class="num">${v == null ? '—' : v}</span></div>`; }).join('');
+  renderProgWords(b);
+  if (A.progDepth) drawDiagram($('#progView'), b.grid, b.result, A.progWord, '#c62828');
+}
+function renderProgWords(b) {
+  const el = $('#progWords');
+  el.innerHTML = WORDS.map(w => `<button type="button" class="btn quiet${w === A.progWord ? ' on' : ''}" data-word="${w}">${w} · ${b.result.ratings[w] ?? '—'}</button>`).join('');
+  el.querySelectorAll('button').forEach(x => x.onclick = () => { A.progWord = x.dataset.word; renderProgWords(b); drawDiagram($('#progView'), b.grid, b.result, A.progWord, '#c62828'); });
+}
+/* Scan the animation: every `step` frames, rate every bay, keep the best for each use. */
+async function scanAnimation() {
+  if (A.scan) return;
+  const S = settingsOf(A.animId); if (!S) return;
+  const step = +$('#progStep').value || 10, max = PSGen.frameMax(S), out = { lobby: [], gathering: [], working: [] };
+  A.scan = { stop: false }; $('#progScanGo').disabled = true; $('#progScanStop').hidden = false;
+  const [nx, ny, nz] = S.dims;
+  try {
+    for (let f = 1; f <= max; f += step) {
+      if (A.scan.stop) break;
+      $('#progScanStatus').textContent = `Frame ${f} of ${max}…`;
+      const sizes = await PSGen.generate(S, f); if (!sizes) continue;
+      const vox = { nx, ny, nz, sizes, max: 255, threshold: THR };
+      for (const b of bayBoxes(vox)) {
+        const { result } = analyzeVox(vox, THR, b), measures = measureBay(vox, THR, b, result), p = programScores(result.ratings, measures, result.features.empty);
+        for (const k of PROGRAM_KEYS) { out[k].push({ frame: f, bay: b.i, score: p[k].score }); }
+      }
+      await new Promise(r => setTimeout(r, 0));
+    }
+    for (const k of PROGRAM_KEYS) out[k].sort((a, c) => c.score - a.score || a.frame - c.frame);
+    $('#progResults').innerHTML = PROGRAM_KEYS.map(k => `<table><thead><tr><th colspan="3">Best for ${PROGRAMS[k].name.toLowerCase()}</th></tr></thead><tbody>${out[k].slice(0, 6).map(r => `<tr><td><button type="button" data-frame="${r.frame}" data-bay="${r.bay}">frame ${r.frame}</button></td><td>bay ${r.bay + 1}</td><td>${r.score}</td></tr>`).join('')}</tbody></table>`).join('');
+    $$('#progResults button').forEach(bt => bt.onclick = () => { A.frame = +bt.dataset.frame; A.bay = +bt.dataset.bay; fillPickers(); loadFrame(); });
+    $('#progScanStatus').textContent = A.scan.stop ? 'Stopped — the results so far are below. Click a frame to open it.' : `Scanned ${Math.floor((max - 1) / step) + 1} frames of ${animName(A.animId)}. Click a frame to open it.`;
+  } finally { A.scan = null; $('#progScanGo').disabled = false; $('#progScanStop').hidden = true; }
+}
+
 // ------------------------------------------------------------------ tabs
-const TAB_OF = { generator: 'generator', analyze: 'analyze', model: 'model' };
+const TAB_OF = { generator: 'generator', analyze: 'analyze', program: 'program', model: 'model' };
 function showTab(name) {
   name = TAB_OF[name] || 'generator';
   A.tab = name;
@@ -374,7 +450,7 @@ function showTab(name) {
   $$('.topbar a[data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === name));
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
   window.scrollTo({ top: 0 });
-  if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'analyze') drawView(A.item); }
+  if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'analyze') drawView(A.item); else if (name === 'program') renderProgram(); }
   window.dispatchEvent(new Event('resize'));
 }
 document.addEventListener('click', e => {
@@ -390,8 +466,14 @@ function boot() {
   try { A.depth = localStorage.getItem('protospace.depth') === '1'; } catch (e) {}
   const dt = $('#depthToggle'); dt.checked = A.depth; $('#depthWrap').hidden = !A.depth;
   dt.addEventListener('change', () => { A.depth = dt.checked; $('#depthWrap').hidden = !A.depth; try { localStorage.setItem('protospace.depth', A.depth ? '1' : '0'); } catch (e) {} if (A.item) drawView(A.item); });
-  window.addEventListener('resize', () => { if (A.item && A.tab === 'analyze') drawView(A.item); });
+  window.addEventListener('resize', () => { if (A.item && A.tab === 'analyze') drawView(A.item); if (A.item && A.item.bays && A.tab === 'program' && A.progDepth) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
   A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'camera', color: 'render', ratio: 0.5, emptyText: 'Pick an animation and a frame above.' });
+  A.pv = createViewer($('#progViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'iso', color: 'foam', ratio: 0.62, emptyText: 'Pick an animation and a frame above.' });
+  const hs = $('#progHl'); hs.innerHTML = HIGHLIGHTS.map(([k, t]) => `<option value="${k}">${t}</option>`).join(''); hs.value = A.hl;
+  hs.addEventListener('change', () => { A.hl = hs.value; if (A.item && A.item.bays && A.pv) { const b = A.item.bays[A.bay]; A.pv.setHighlight(highlightCells(A.item.vox, THR, b.box, A.hl, b.result)); } });
+  const pd = $('#progDepth'); pd.addEventListener('change', () => { A.progDepth = pd.checked; $('#progDepthWrap').hidden = !A.progDepth; if (A.progDepth && A.item && A.item.bays) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
+  $('#progScanGo').addEventListener('click', scanAnimation);
+  $('#progScanStop').addEventListener('click', () => { if (A.scan) A.scan.stop = true; });
   A.model = createViewer($('#model3dViewer'), { panel: 'side', sections: ['look', 'crop', 'cut', 'export'], open: { look: true, crop: true, cut: false, export: false }, emptyText: 'Pick an animation and a frame above to see its 3D model.', onBox: rateBox });
   PSGen.mount({
     analyze: (vox, thr) => analyzeVox(vox, thr),

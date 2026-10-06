@@ -10,7 +10,7 @@ settings as a .py for Blender).
 Everything runs in the browser — no build step, no server code, nothing leaves the device.
 Live at the Vercel deployment of this repository.
 
-## The three tabs
+## The four tabs
 
 - **Generator** — the animation. The *Modifiers* dropdown inside the picture holds every
   control of the Blender group with the same meaning (Pattern, Motion, Growth, Noise /
@@ -27,6 +27,15 @@ Live at the Vercel deployment of this repository.
   question, a score, what the frame shows, what was measured and how to raise it. The full
   rubric-v3 assessment (editable interpretation, combined score, JSON download) and the
   method notes are folded away underneath.
+- **Program** — every 9 m bay of the frame, rated on all twelve descriptors and on its own
+  cubes (solids, floors with headroom, sheltered floors, a roofed hall at the ground, open
+  ground, see-through columns, pockets, streets, openings), then scored 0–100 for three uses —
+  **Lobby**, **Gathering**, **Working** (`js/program.js`: 60 % descriptors that matter for
+  the use, 40 % counts). The best bay for each use is picked out; any bay opens a deep
+  analysis: the bay alone in 3D with what a reading counts lit in red (solids, voids, floors…),
+  the three scores with every piece behind them, the counts, the twelve ratings, and the bay's
+  depth diagram with the selected rating's reading drawn in red. *Scan the whole animation*
+  rates every bay of every sampled frame and lists the best frame + bay for each use.
 - **3D model** — the same frame as a model. Orbit, preset views, the render camera,
   turntable; **crop box** — tick it and a cube appears: drag it with the mouse to move it
   around the slab (the green arrow lifts it), make it bigger or smaller, and everything
@@ -82,7 +91,8 @@ js/field.js           The pattern field: Blender-exact noise / Voronoi, loop, gr
 js/gen.worker.js      Web Worker evaluating depth slices of the field
 js/generator.js       The Generator tab, the saved-animation store, the worker pools (PSGen)
 js/viewer.js          createViewer() — the Three.js lattice viewer with crop box, cuts and exports
-js/app.js             Page logic: pickers, ratings, drawing, full assessment, 3D model tab, tabs
+js/program.js         Bays, their counts, the Lobby / Gathering / Working scores, the red highlights (ES module, also in Node)
+js/app.js             Page logic: pickers, ratings, drawing, full assessment, Program tab, 3D model tab, tabs
 assets/favicon.svg
 vendor/three/         Three.js r186 and the addons used (OrbitControls, TransformControls, RoundedBox, exporters)
 ```
