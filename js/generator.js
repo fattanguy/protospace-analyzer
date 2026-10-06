@@ -364,6 +364,7 @@ export function mount(hooks) {
   document.addEventListener('pointerdown', e => { if (!panel.hidden && !e.target.closest('.gen-dd')) openDD(false); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !panel.hidden) openDD(false); });
   // timeline
+  G.frame = clamp(G.frame, 1, frameMaxOf(G.S));
   setFrameRange(); $('#genFrame').value = G.frame; $('#genFrameNumber').value = G.frame;
   $('#genFrame').addEventListener('input', e => { play(false); setFrame(+e.target.value, true); saveSettings(); });
   $('#genFrameNumber').addEventListener('change', e => { play(false); setFrame(+e.target.value); saveSettings(); });
