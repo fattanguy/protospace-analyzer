@@ -80,7 +80,7 @@ const SECTIONS = {
           <summary>Crop box</summary>
           <label><input data-v="cropOn" type="checkbox"> Crop to a box</label>
           <div data-v="cropFields" hidden>
-            <p class="hint">Everything outside the box is cut away. Drag the arrows on the box to move it, or use the sliders. Metres (1 cube = 1 m).</p>
+            <p class="hint">Everything outside the box is cut away. Drag the box to slide it around the slab (the green arrow lifts it), or use the sliders. Metres (1 cube = 1 m).</p>
             <div class="m3d-axis"><span>Along the slab</span>
               <label>Start <input data-v="boxX" type="range" min="0" max="10" step="1" value="0"><output data-v="boxXv"></output></label>
               <label>Width <input data-v="boxW" type="range" min="1" max="10" step="1" value="10"><output data-v="boxWv"></output></label></div>
@@ -184,7 +184,7 @@ export function createViewer(root, opts = {}) {
     M.pivot = new THREE.Object3D(); scene.add(M.pivot);
     if (sections.includes('crop')) {
       const tc = new TransformControls(camera, renderer.domElement);
-      tc.setMode('translate'); tc.setTranslationSnap(1); tc.size = 0.75; tc.enabled = false;
+      tc.setMode('translate'); tc.size = 1.1; tc.enabled = false;
       const helper = tc.getHelper(); helper.visible = false; scene.add(helper);
       tc.attach(M.pivot);
       tc.addEventListener('dragging-changed', e => { controls.enabled = !e.value; if (!e.value) boxChanged(); });
@@ -196,6 +196,7 @@ export function createViewer(root, opts = {}) {
     resize();
     new IntersectionObserver(entries => { M.visible = entries[0].isIntersecting; if (M.visible) loop(); }, { threshold: 0 }).observe(viewport);
     renderer.domElement.addEventListener('click', pick);
+    wireBoxDrag(renderer.domElement);
     wireControls();
     M.ready = true;
     loop();
@@ -522,14 +523,47 @@ export function createViewer(root, opts = {}) {
   }
   function leaveCameraView() { M.viewName = 'orbit'; M.el.querySelectorAll('[data-view]').forEach(b => b.classList.remove('on')); M.camera.fov = 38; M.camera.updateProjectionMatrix(); resize(); }
 
+  // ------------------------------------------------------------------ dragging the box itself
+  /* Grab the box anywhere and slide it along the slab and in depth (on the level plane through the grab point);
+     the gizmo's arrows move one axis at a time, the green one lifts it. */
+  function wireBoxDrag(el) {
+    let drag = null;
+    const hitBox = e => { if (!M.box.on || !M.boxFill.visible) return null; castRay(e); return ray.intersectObject(M.boxFill, false)[0] || null; };
+    el.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || (M.gizmo && M.gizmo.axis)) return;
+      const hit = hitBox(e); if (!hit) return;
+      drag = { plane: new THREE.Plane(new THREE.Vector3(0, 1, 0), -hit.point.y), start: hit.point.clone(), c0: M.pivot.position.clone(), id: e.pointerId };
+      M.controls.enabled = false; el.setPointerCapture(e.pointerId); el.style.cursor = 'grabbing';
+      e.stopImmediatePropagation(); e.preventDefault();
+    }, true);
+    el.addEventListener('pointermove', e => {
+      if (!drag) { if (M.box.on && M.boxFill.visible && !(M.gizmo && M.gizmo.axis)) el.style.cursor = hitBox(e) ? 'move' : ''; return; }
+      castRay(e);
+      const p = new THREE.Vector3(); if (!ray.ray.intersectPlane(drag.plane, p)) return;
+      M.pivot.position.set(drag.c0.x + (p.x - drag.start.x), drag.c0.y, drag.c0.z + (p.z - drag.start.z));
+      boxFromPivot();
+      e.stopImmediatePropagation();
+    }, true);
+    const end = e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag = null; M.controls.enabled = true; el.style.cursor = ''; M.dragEnd = performance.now(); try { el.releasePointerCapture(e.pointerId); } catch (err) {}
+      boxChanged(); e.stopImmediatePropagation();
+    };
+    el.addEventListener('pointerup', end, true); el.addEventListener('pointercancel', end, true);
+  }
+
   // ------------------------------------------------------------------ inspection
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
-  function pick(e) {
-    if (!M.mesh || !M.cells) return;
-    if (M.gizmo && (M.gizmo.dragging || M.gizmo.axis)) return;
+  function castRay(e) {
     const r = M.renderer.domElement.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, M.camera);
+  }
+  function pick(e) {
+    if (!M.mesh || !M.cells) return;
+    if (M.gizmo && (M.gizmo.dragging || M.gizmo.axis)) return;
+    if (performance.now() - (M.dragEnd || 0) < 300) return;
+    castRay(e);
     const hit = ray.intersectObject(M.mesh, false)[0];
     const info = V('info');
     if (!hit) { info.textContent = 'Click a cube for its reading.'; return; }
