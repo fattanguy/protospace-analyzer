@@ -181,5 +181,9 @@
   .m3d-panel .legend .sw {border-color:var(--rule);}
   .m3d-panel .hint {font-size:12px;}
   .m3d-exports {display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0;}
+  .m3d-exports .btn.on {background:#c62828;border-color:#c62828;color:#fff;}
+  .m3d-frames {margin-top:18px;}
+  .m3d-frames .eyebrow {margin-bottom:8px;}
+  .seg button.on[data-view] {background:var(--ink);color:var(--bg);}
   .m3d-exports .btn {width:100%;}
   @media(max-width:960px) {.m3d {grid-template-columns:1fr;}}

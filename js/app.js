@@ -64,7 +64,9 @@
         motion = true; openMedia(file);
       } else if (/^image\//.test(file.type)) {
         addImage(URL.createObjectURL(file), file.name.replace(/\.[^.]+$/, ''), false);
-      } else setStatus('Unsupported file. Choose an image, GIF, or browser-compatible video.');
+      } else if (/\.json$/i.test(file.name) || file.type === 'application/json') {
+        addVoxelFile(file);
+      } else setStatus('Unsupported file. Choose an image, GIF, a browser-compatible video, or a Blender frame (.json).');
     }
   }
 
@@ -72,7 +74,7 @@
   const video = $('#mediaVideo'), gif = $('#mediaGif'), seek = $('#mediaSeek');
   function stamp(t) { return Math.floor(t / 60) + ':' + (t % 60).toFixed(3).padStart(6, '0'); }
   function mediaButtons(enabled) {
-    ['mediaPlay','mediaPrev','mediaNext','mediaSeek','mediaAnalyze'].forEach(id => $('#' + id).disabled = !enabled);
+    ['mediaPlay','mediaPrev','mediaNext','mediaSeek','mediaAnalyze','mediaModel'].forEach(id => $('#' + id).disabled = !enabled);
   }
   function pauseMedia() {
     M.playing = false; clearTimeout(M.timer); video.pause(); $('#mediaPlay').textContent = 'Play';
@@ -157,8 +159,8 @@
   video.addEventListener('timeupdate', mediaPosition);
   video.addEventListener('play', () => $('#mediaPlay').textContent = 'Pause');
   video.addEventListener('pause', () => $('#mediaPlay').textContent = 'Play');
-  video.addEventListener('seeking', () => $('#mediaAnalyze').disabled = true);
-  video.addEventListener('seeked', () => { $('#mediaAnalyze').disabled = false; mediaPosition(); });
+  video.addEventListener('seeking', () => { $('#mediaAnalyze').disabled = true; $('#mediaModel').disabled = true; });
+  video.addEventListener('seeked', () => { $('#mediaAnalyze').disabled = false; $('#mediaModel').disabled = false; mediaPosition(); });
   $('#mediaPlay').onclick = async () => {
     if (M.kind === 'gif') {
       if (M.playing) pauseMedia();
@@ -174,7 +176,7 @@
   seek.oninput = () => moveMedia(+seek.value);
   $('#mediaPrev').onclick = () => moveMedia(M.kind === 'gif' ? M.index - 1 : video.currentTime - 0.1);
   $('#mediaNext').onclick = () => moveMedia(M.kind === 'gif' ? M.index + 1 : video.currentTime + 0.1);
-  $('#mediaAnalyze').onclick = () => {
+  function captureFrame(open3D) {
     if (M.busy || (M.kind === 'video' && (video.seeking || video.readyState < 2))) return;
     pauseMedia();
     const c = document.createElement('canvas'), src = M.kind === 'gif' ? gif : video;
@@ -184,6 +186,17 @@
     const name = M.name + ' · ' + stamp(M.kind === 'gif' ? M.times[M.index] : video.currentTime) + (M.kind === 'gif' ? ' · frame ' + (M.index + 1) : '');
     c.toBlob(blob => { if (blob) addImage(URL.createObjectURL(blob), name, false); }, 'image/png');
     $('#mediaStatus').textContent = 'Saved ' + name + ' for analysis below. Choose another moment to compare.';
+  }
+  $('#mediaAnalyze').onclick = () => captureFrame(false);
+  $('#mediaModel').onclick = () => {
+    if (M.busy || (M.kind === 'video' && (video.seeking || video.readyState < 2))) return;
+    pauseMedia();
+    const fps = VOX.fps || 24;
+    const frame = M.kind === 'gif' ? M.index + 1 : Math.round(video.currentTime * fps) + 1;
+    const n = VOX.library ? Math.max(VOX.library.min, Math.min(VOX.library.max, frame)) : frame;
+    $('#mediaStatus').textContent = `Loading Blender frame ${n} (${M.kind === 'gif' ? 'GIF frame ' + (M.index + 1) : stamp(video.currentTime) + ' at ' + fps + ' fps'})…`;
+    if (window.PSModel3D) PSModel3D.scrollAfterNextBuild();
+    loadLibraryFrame(n).catch(err => { $('#mediaStatus').textContent = 'No Blender frame for this moment: ' + err.message; });
   };
 
   function addImage(src, name, isExample) {
@@ -199,8 +212,148 @@
     im.src = src;
   }
 
+  // ---- Blender frames: the cube lattice of a frame, exported with blender/export_frame.py
+  const VOX = { threshold: 8, library: null, cache: new Map(), fps: 24, libraryItem: null };
+  const CELL = 12;                                                   // screen pixels per cube in the synthetic elevation
+  const TONE_OF_DEPTH = [[0, 0.02], [3, 0.09], [8.5, 0.20], [18, 0.40], [26, 0.70]];
+  function toneOfDepth(d) {                                          // inverse of the analyzer's tone → depth calibration
+    if (d <= 0) return 0.02;
+    for (let i = 1; i < TONE_OF_DEPTH.length; i++) { const [d0, t0] = TONE_OF_DEPTH[i - 1], [d1, t1] = TONE_OF_DEPTH[i]; if (d <= d1) return t0 + (t1 - t0) * (d - d0) / (d1 - d0); }
+    return 0.70;
+  }
+  function decodeVoxels(data) {
+    if (!data || data.format !== 'protospace-voxels' || !data.dims || !data.sizes) throw new Error('not a ProtoSpace frame file (expected format "protospace-voxels")');
+    const [nx, ny, nz] = data.dims, n = nx * ny * nz, raw = atob(data.sizes), sizes = new Uint8Array(n);
+    if (data.size_bits === 8) { for (let i = 0; i < n; i++) sizes[i] = raw.charCodeAt(i); }
+    else for (let i = 0; i < n; i++) { const b = raw.charCodeAt(i >> 1); sizes[i] = (i & 1) ? (b >> 4) & 15 : b & 15; }
+    return { nx, ny, nz, sizes };
+  }
+  function voxelCamera(data) {
+    const c = data.camera; if (!c || !c.position) return null;
+    const AX = { X: 0, Y: 1, Z: 2 }, ax = data.axes || { across: '+Y', up: '+Z', depth: '-X' };
+    const parse = sp => ({ i: AX[sp[1]], s: sp[0] === '-' ? -1 : 1 });
+    const A = parse(ax.across), U = parse(ax.up), Dp = parse(ax.depth), [nx, ny, nz] = data.dims, o = data.origin, sp = data.spacing || 0.14;
+    const one = (P, ax_, dim) => { const v = (P[ax_.i] - o[ax_.i]) / sp + 0.5; return ax_.s > 0 ? v : dim - v; };
+    return Object.assign({}, c, { lattice: P => [one(P, A, nx), one(P, U, ny), one(P, Dp, nz)] });
+  }
+  function voxelItem(data, name) {
+    const vox = decodeVoxels(data);
+    const frame = data.frame;
+    return { id: Math.random().toString(36).slice(2), name: name || `Blender frame ${String(frame).padStart(4, '0')}`, kind: 'voxels', frame, data, vox, camera: voxelCamera(data), ready: false, isExample: false };
+  }
+  function prepareVoxel(item) {
+    const { nx, ny, nz, sizes } = item.vox, thr = VOX.threshold;
+    // the elevation the analyzer reads: every column at the tone of its first solid cube
+    const tone = new Float32Array(nx * ny), band = new Uint8Array(nx * ny), depth = new Int16Array(nx * ny).fill(-1);
+    for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+      let z0 = -1; for (let z = 0; z < nz; z++) if (sizes[x + nx * (y + ny * z)] >= thr) { z0 = z; break; }
+      const i = y * nx + x; depth[i] = z0;
+      if (z0 < 0) { tone[i] = 1; band[i] = 4; } else { tone[i] = toneOfDepth(z0); band[i] = z0 < 3 ? 0 : z0 < 9 ? 1 : z0 < 19 ? 2 : 3; }
+    }
+    item.fullGrid = { cols: nx, rows: ny, tone, band, pitch: CELL, px: 0, py: 0, invert: false, w: nx * CELL, h: ny * CELL, depth };
+    const c = document.createElement('canvas'); c.width = nx * CELL; c.height = ny * CELL;
+    const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+    for (let y = 0; y < ny; y++) for (let x0 = 0; x0 < nx; x0++) {
+      const i = y * nx + x0; if (depth[i] < 0) continue;
+      const t = Math.round(tone[i] * 255); x.fillStyle = `rgb(${t},${t},${t})`;
+      x.fillRect(x0 * CELL, (ny - 1 - y) * CELL, CELL, CELL);
+      x.fillStyle = 'rgba(255,255,255,0.18)'; x.fillRect(x0 * CELL, (ny - 1 - y) * CELL, CELL, 1); x.fillRect(x0 * CELL, (ny - 1 - y) * CELL, 1, CELL);
+    }
+    item.canvas = c; item.w = c.width; item.h = c.height; item.g = null;
+    item.pitch = CELL; item.userPitch = null; item.inverted = false; item.recognised = false; item.match = null; item.detPitch = CELL; item.detConf = 1;
+    item.region = item.region || null; item.ready = true; item.threshold = thr;
+  }
+  function analyzeVoxel(item) {
+    const G = item.fullGrid;
+    let c0 = 0, r0 = 0, cols = G.cols, rows = G.rows;
+    if (item.region) {
+      const R = item.region;
+      c0 = Math.max(0, Math.floor(R.x0 / CELL)); const c1 = Math.min(G.cols, Math.ceil(R.x1 / CELL));
+      const rTop = Math.max(0, Math.floor(R.y0 / CELL)), rBot = Math.min(G.rows, Math.ceil(R.y1 / CELL));
+      r0 = G.rows - rBot; rows = rBot - rTop; cols = c1 - c0;
+      if (cols < 3 || rows < 3) { item.region = null; return analyzeVoxel(item); }
+    }
+    const tone = new Float32Array(cols * rows), band = new Uint8Array(cols * rows);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const gi = (r + r0) * G.cols + c + c0; tone[r * cols + c] = G.tone[gi]; band[r * cols + c] = G.band[gi]; }
+    item.grid = { cols, rows, tone, band, pitch: CELL, px: 0, py: 0, invert: false, w: cols * CELL, h: rows * CELL };
+    item.result = PSA.analyze(item.grid);
+    item.R = { x0: c0 * CELL, y0: (G.rows - r0 - rows) * CELL, x1: (c0 + cols) * CELL, y1: (G.rows - r0) * CELL };
+    item.voxWindow = { c0, r0 };
+    const reviewKey = JSON.stringify(['vox', item.frame, item.R, VOX.threshold]);
+    if (item.reviewKey !== reviewKey) item.reviews = {};
+    item.reviewKey = reviewKey;
+    item.zone3D = null;
+  }
+  function addVoxelData(data, name, selectIt = true) {
+    let item;
+    try { item = voxelItem(data, name); } catch (err) { setStatus('Could not read this Blender frame: ' + err.message); return null; }
+    if (data.fps) VOX.fps = data.fps;
+    S.items.push(item);
+    renderGallery();
+    if (selectIt) select(item);
+    return item;
+  }
+  function addVoxelFile(file) {
+    file.text().then(text => { let data; try { data = JSON.parse(text); } catch (e) { setStatus(file.name + ': not valid JSON.'); return; }
+      if (data.format === 'protospace-voxels-index') { setStatus('That is the index of an export folder — drop the frame_NNNN.json files themselves.'); return; }
+      addVoxelData(data, file.name.replace(/\.json$/i, '').replace(/^frame_(\d+)$/, (m, n) => 'Blender frame ' + n));
+    }).catch(err => setStatus('Could not read ' + file.name + ': ' + err.message));
+  }
+  // the built-in library: frames/index.json + frames/frame_NNNN.json, exported from the Blender scene
+  async function loadLibraryIndex() {
+    try {
+      const r = await fetch('frames/index.json'); if (!r.ok) throw new Error(r.status);
+      const idx = await r.json(); const frames = idx.frames.map(f => f.frame);
+      VOX.library = { source: idx.source, frames: new Set(frames), min: Math.min(...frames), max: Math.max(...frames) };
+      $('#voxLibraryName').textContent = (idx.source || 'Blender scene').replace(/\.blend$/, '');
+      $('#voxLibraryRange').textContent = `${VOX.library.min}–${VOX.library.max}`;
+      for (const id of ['voxFrame', 'voxFrameNumber']) { $('#' + id).min = VOX.library.min; $('#' + id).max = VOX.library.max; }
+    } catch (e) { VOX.library = null; $('#voxLibrary').hidden = true; }
+  }
+  async function fetchLibraryFrame(n) {
+    if (VOX.cache.has(n)) return VOX.cache.get(n);
+    const r = await fetch(`frames/frame_${String(n).padStart(4, '0')}.json`);
+    if (!r.ok) throw new Error(`frame ${n} is not in the library`);
+    const data = await r.json(); VOX.cache.set(n, data); return data;
+  }
+  async function loadLibraryFrame(n) {
+    const data = await fetchLibraryFrame(n);
+    $('#voxFrame').value = n; $('#voxFrameNumber').value = n;
+    let item = VOX.libraryItem;
+    if (item && S.items.includes(item)) {                                   // one library entry that follows the slider
+      Object.assign(item, { name: `Blender frame ${String(n).padStart(4, '0')}`, frame: n, data, vox: decodeVoxels(data), camera: voxelCamera(data), ready: false, region: null, reviews: {} });
+      renderGallery(); select(item);
+    } else { item = addVoxelData(data, `Blender frame ${String(n).padStart(4, '0')}`); VOX.libraryItem = item; }
+    if (data.fps) VOX.fps = data.fps;
+    return item;
+  }
+  function wireVoxels() {
+    const drop = $('#voxDrop');
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => { for (const f of e.dataTransfer.files) if (/\.json$/i.test(f.name)) addVoxelFile(f); });
+    $('#voxFile').addEventListener('change', e => { for (const f of e.target.files) addVoxelFile(f); e.target.value = ''; });
+    const thr = $('#voxThreshold'), thrV = $('#voxThresholdValue');
+    const showThr = () => thrV.textContent = Math.round(+thr.value / 15 * 100) + '%';
+    showThr();
+    thr.addEventListener('input', showThr);
+    thr.addEventListener('change', () => { VOX.threshold = +thr.value; S.items.forEach(it => { if (it.kind === 'voxels') it.ready = false; }); if (S.current && S.current.kind === 'voxels') select(S.current); });
+    const go = n => { n = Math.round(+n); if (!isFinite(n)) return; $('#voxLibraryStatus').textContent = `Loading frame ${n}…`; loadLibraryFrame(n).then(() => { $('#voxLibraryStatus').textContent = `Frame ${n} loaded: rated and modelled from its real cube lattice. Drag the slider to step through the animation.`; }).catch(err => { $('#voxLibraryStatus').textContent = err.message; }); };
+    let t = null;
+    $('#voxFrame').addEventListener('input', e => { $('#voxFrameNumber').value = e.target.value; clearTimeout(t); t = setTimeout(() => go(e.target.value), 180); });
+    $('#voxFrameNumber').addEventListener('change', e => { $('#voxFrame').value = e.target.value; go(e.target.value); });
+    $('#voxLoad').onclick = () => go($('#voxFrameNumber').value);
+    $('#voxLoadAll').onclick = async () => {
+      if (!VOX.library) return; const btn = $('#voxLoadAll'); btn.disabled = true;
+      const all = [...VOX.library.frames].sort((a, b) => a - b); let done = 0;
+      for (const n of all) { try { await fetchLibraryFrame(n); } catch (e) {} done++; if (done % 10 === 0) $('#voxLibraryStatus').textContent = `Loading the library… ${done} of ${all.length} frames.`; }
+      $('#voxLibraryStatus').textContent = `All ${all.length} frames are loaded — scrubbing the slider is instant now.`; btn.disabled = false;
+    };
+  }
+
   // ---- analysis of an item
   function prepare(item) {
+    if (item.kind === 'voxels') return prepareVoxel(item);
     // working copy at most 1400 px wide
     const sc = Math.min(1, 1400 / item.im.naturalWidth);
     const w = Math.round(item.im.naturalWidth * sc), h = Math.round(item.im.naturalHeight * sc);
@@ -238,6 +391,7 @@
     return { x0: 0, y0: 0, x1: item.w, y1: item.h };
   }
   function analyzeItem(item) {
+    if (item.kind === 'voxels') return analyzeVoxel(item);
     const R = regionOf(item);
     const rw = R.x1 - R.x0, rh = R.y1 - R.y0;
     const sub = new Float32Array(rw * rh);
@@ -268,20 +422,26 @@
   function setStatus(t) { $("#status").textContent = t; }
 
   function renderGallery() {
-    const g = $("#gallery"); g.innerHTML = "";
+    for (const g of [$("#gallery"), $("#m3dFrames")]) { if (g) renderGalleryInto(g); }
+    $("#galleryWrap").hidden = S.items.length === 0;
+    const fw = $("#m3dFramesWrap"); if (fw) fw.hidden = S.items.length < 2;
+  }
+  function renderGalleryInto(g) {
+    g.innerHTML = "";
     S.items.forEach(item => {
       const b = document.createElement("button"); b.className = "thumb" + (item === S.current ? " on" : ""); b.type = "button";
       b.title = item.name; b.setAttribute("aria-label", "Select " + item.name);
       const c = document.createElement("canvas"); c.width = 160; c.height = 90;
-      const x = c.getContext("2d"); const r = Math.min(160 / item.im.naturalWidth, 90 / item.im.naturalHeight);
-      const w = item.im.naturalWidth * r, h = item.im.naturalHeight * r;
-      x.fillStyle = "#fff"; x.fillRect(0, 0, 160, 90); x.drawImage(item.im, (160 - w) / 2, (90 - h) / 2, w, h);
+      if (item.kind === 'voxels' && !item.ready) prepareVoxel(item);
+      const src = item.kind === 'voxels' ? item.canvas : item.im, sw = src.naturalWidth || src.width, sh = src.naturalHeight || src.height;
+      const x = c.getContext("2d"); const r = Math.min(160 / sw, 90 / sh);
+      const w = sw * r, h = sh * r;
+      x.fillStyle = "#fff"; x.fillRect(0, 0, 160, 90); x.drawImage(src, (160 - w) / 2, (90 - h) / 2, w, h);
       b.appendChild(c);
       const cap = document.createElement("span"); cap.textContent = item.name + (item.isExample ? " · example" : ""); b.appendChild(cap);
       b.onclick = () => select(item);
       g.appendChild(b);
     });
-    $("#galleryWrap").hidden = S.items.length === 0;
   }
 
   function renderAll() {
@@ -297,6 +457,11 @@
 
   function renderCaption(item) {
     const m = item.match, el = $("#status");
+    if (item.kind === 'voxels') {
+      const v = item.vox, d = item.data, solid = v.sizes.reduce((a, s) => a + (s >= VOX.threshold ? 1 : 0), 0);
+      el.textContent = `Blender frame ${d.frame} of ${d.source || 'the slab'} · ${v.nx} × ${v.ny} m slab, ${v.nz} m deep · ${solid.toLocaleString('en-US')} solid cubes at ≥ ${Math.round(VOX.threshold / 15 * 100)}% size · rated from the real cube lattice${item.region ? ' (the part you dragged)' : ''}. Drag a rectangle to rate only part of it.`;
+      return;
+    }
     const px = (item.userPitch || item.pitch);
     const across = (item.R.x1 - item.R.x0) / px;
     let s;
@@ -308,11 +473,12 @@
   }
 
   function renderControls(item) {
-    const bays = $("#bays");
-    bays.hidden = !(item.recognised && item.match.full);
+    const bays = $("#bays"), vox = item.kind === 'voxels';
+    bays.hidden = !(item.recognised && item.match && item.match.full);
     bays.querySelectorAll("button").forEach(b => b.classList.toggle("on", +b.dataset.bay === item.bay));
     $("#scale").value = ((item.R.x1 - item.R.x0) / (item.userPitch || item.pitch)).toFixed(1);
-    $("#scaleWrap").hidden = item.recognised;
+    $("#scaleWrap").hidden = item.recognised || vox;
+    $("#invert").parentElement.hidden = vox;
     $("#regionHint").hidden = item.recognised;
     $("#resetRegion").hidden = !item.region;
     $("#invert").checked = !!item.inverted;
@@ -569,7 +735,13 @@
   // ---- hand the analysed frame (and the chosen area) to the 3D generator (js/model3d.js)
   function pushModel(item){
     if(!window.PSModel3D||!item||!item.result)return;
-    PSModel3D.setSource({name:item.name,grid:item.grid,result:item.result,image:{canvas:item.canvas,R:item.R},area:EX.chosen&&EX.item===item&&EX.result===item.result?{c:EX.chosen.c,r:EX.chosen.r,w:EX.chosen.w,h:EX.chosen.h}:null});
+    const area=EX.chosen&&EX.item===item&&EX.result===item.result?{c:EX.chosen.c,r:EX.chosen.r,w:EX.chosen.w,h:EX.chosen.h}:null;
+    if(item.kind==='voxels'){
+      PSModel3D.setSource({name:item.name,frame:item.frame,vox:{nx:item.vox.nx,ny:item.vox.ny,nz:item.vox.nz,sizes:item.vox.sizes,threshold:VOX.threshold},camera:item.camera,grid:item.grid,R:{c0:item.voxWindow.c0,r0:item.voxWindow.r0},result:item.result,area});
+      return;
+    }
+    const hint=item.recognised&&item.match.full?`This is a picture (recognised as frame ${item.match.frame} of the old renders).`:'This is a picture.';
+    PSModel3D.setSource({name:item.name,message:`${hint} The 3D model is built only from real Blender geometry — pick a frame from the Blender library at the top of the page, or export the frame you want with <code>blender/export_frame.py</code> and drop its .json there.`});
   }
   function pushArea(){
     if(!window.PSModel3D)return;
@@ -649,7 +821,7 @@
     $('#spaceCut').oninput=()=>{drawSpaceOverview();drawSpaceSection();if(window.PSModel3D&&PSModel3D.ready&&PSModel3D.settings.scope==='area')PSModel3D.setSectionFromStudy(+$('#spaceCut').value+1,null);};
     $('#spaceThickness').oninput=()=>{if(!EX.chosen)return;drawSpaceSection();};
     $('#spaceModelArea').onclick=()=>{if(!EX.chosen||!window.PSModel3D)return;pushArea();PSModel3D.setScope('area');PSModel3D.setSectionFromStudy(+$('#spaceCut').value+1,true);document.getElementById('model3d').scrollIntoView({behavior:'smooth',block:'start'});};
-    $('#spaceModelFrame').onclick=()=>{if(!window.PSModel3D)return;PSModel3D.setScope('frame');document.getElementById('model3d').scrollIntoView({behavior:'smooth',block:'start'});};
+    $('#spaceModelFrame').onclick=()=>{if(!window.PSModel3D)return;PSModel3D.setScope('picture');document.getElementById('model3d').scrollIntoView({behavior:'smooth',block:'start'});};
     $('#spaceSaveSection').onclick=()=>{if(EX.svg)downloadSpace(EX.svg,'image/svg+xml','ProtoSpace-inferred-section.svg');};
     window.addEventListener('resize',()=>{if(EX.chosen)drawSpaceOverview();});
   }
@@ -688,6 +860,8 @@
   // ---- boot
   wireExplorer();
   wire();
+  wireVoxels();
+  loadLibraryIndex();
   setStatus("Loading the animation's 250 frames for recognition…");
   loadThumbs().then(th => {
     S.thumbs = th;

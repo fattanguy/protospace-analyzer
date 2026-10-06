@@ -24,7 +24,7 @@
   <header>
     <div class="eyebrow">ProtoSpace · descriptor analyzer</div>
     <h1>Descriptor Analyzer</h1>
-    <p class="lede">Import an image, GIF or video of the cube slab. Pause or scrub the player, then select “Analyze this frame” to save, rate and build a 3D model of that moment. Import a render — a whole frame of the animation or a crop of a zone — and it is rated 0–100 on Modular, Fragmented, Interlocking, Porous, Clustered, Decentralized, Networked, Layered, Intimate, Visually Connected, Socially Interactive and Village-Like, with the measurements behind every number. Scores describe fit to project targets, not overall architectural quality. Each analyzed image automatically receives quantitative scores, qualitative interpretations and a combined assessment. Frames of your animation are recognised so you can select the same bay windows for comparison.</p>
+    <p class="lede">Import an image, GIF or video of the cube slab. Pause or scrub the player, then select “Analyze this frame” to save and rate that moment — or open the matching Blender frame to rate and model its real geometry. Import a render — a whole frame of the animation or a crop of a zone — and it is rated 0–100 on Modular, Fragmented, Interlocking, Porous, Clustered, Decentralized, Networked, Layered, Intimate, Visually Connected, Socially Interactive and Village-Like, with the measurements behind every number. Scores describe fit to project targets, not overall architectural quality. Each analyzed image automatically receives quantitative scores, qualitative interpretations and a combined assessment. Frames of your animation are recognised so you can select the same bay windows for comparison.</p>
   </header>
 
   <hr class="rule">
@@ -47,6 +47,30 @@
 
   <hr class="rule">
 
+  <section id="blenderImport" class="import" aria-label="Blender frames">
+    <div class="drop" id="voxDrop">
+      <strong>Blender frames</strong>
+      <small>Drop <code>frame_NNNN.json</code> files exported with <code>blender/export_frame.py</code> — the real geometry of a frame, rated and modelled in 3D</small>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;align-items:center">
+        <label class="btn" for="voxFile">Choose frame files</label>
+        <input id="voxFile" type="file" accept=".json,application/json" multiple hidden>
+        <label class="field" title="A cube counts as mass when Blender grew it to at least this share of its full size">Mass at ≥ <input id="voxThreshold" type="range" min="1" max="15" step="1" value="8" style="width:110px"><output id="voxThresholdValue" class="num">53%</output> size</label>
+      </div>
+    </div>
+    <div id="voxLibrary">
+      <div class="eyebrow" style="margin-bottom:8px">Built-in library · <span id="voxLibraryName">Voxel Animation Controls</span> · frames <span id="voxLibraryRange">1–250</span></div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+        <label class="field" style="flex:1;min-width:220px">Frame <input id="voxFrame" type="range" min="1" max="250" step="1" value="93" style="width:100%"></label>
+        <input id="voxFrameNumber" type="number" min="1" max="250" value="93" class="num" style="width:76px;font:inherit;padding:4px 6px;border:1.5px solid var(--rule);background:var(--bg);color:var(--ink)">
+        <button class="btn" type="button" id="voxLoad">Load this frame</button>
+        <button class="btn quiet" type="button" id="voxLoadAll" title="Loads every frame so you can step through the whole animation">Load all 250</button>
+      </div>
+      <p class="hint" id="voxLibraryStatus">Every frame of the animation was exported from Blender with the script in <code>blender/</code>. Pick one and it is rated and modelled from its real cube lattice. Re-run the export after changing the Blender scene and drop the new files above.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
 
   <section id="mediaPanel" hidden aria-label="GIF and video player" style="margin-bottom:32px;border:1px solid var(--rule);padding:20px">
     <h2 style="margin:0 0 12px;font-size:18px">Explore an animation</h2>
@@ -60,9 +84,10 @@
       <label class="field" style="flex:1;min-width:200px">Position <input id="mediaSeek" aria-label="Media position" type="range" min="0" max="1" step="0.001" value="0" disabled style="width:100%"></label>
       <output id="mediaTime" class="num">0:00.000</output>
       <button class="btn" id="mediaAnalyze" disabled>Analyze this frame</button>
+      <button class="btn" id="mediaModel" disabled title="Loads the Blender frame that matches this moment of the video (24 fps) and opens its real 3D model">Open the Blender frame of this moment</button>
     </div>
     <p id="mediaStatus" class="status" role="status" aria-live="polite"></p>
-    <p class="hint">Pause or drag the timeline, then analyze the displayed frame. GIFs step one frame; videos step 0.1 seconds. Saved frames appear in Imported iterations. Files are processed on this device.</p>
+    <p class="hint">Pause or drag the timeline, then analyze the displayed frame. GIFs step one frame; videos step 0.1 seconds. “Open the Blender frame of this moment” loads the real geometry of the matching frame (frame = seconds × 24 + 1) from the Blender library. Saved frames appear in Imported iterations. Files are processed on this device.</p>
   </section>
   <section class="bench" id="bench">
     <div class="viewer">
@@ -152,52 +177,54 @@
   </section>
 
   <section id="model3d" aria-labelledby="m3dTitle">
-    <div class="eyebrow">Frame → 3D · generated from the picture</div>
-    <h2 id="m3dTitle">Build a 3D model of this frame</h2>
-    <p class="lede">Every metre of the analysed frame becomes a cell at the depth its tone implies — black at the front, lighter further back — and the cells are extruded into a solid you can orbit, cut and export. Pick a frame from the video, analyze it, and the model rebuilds here.</p>
+    <div class="eyebrow">Blender frame → 3D · the real geometry</div>
+    <h2 id="m3dTitle">The 3D model of this frame</h2>
+    <p class="lede">The cube lattice of the frame, straight from Blender — every point of the slab with the size of the cube that grew on it, nothing inferred from a picture. Orbit it, look through the render’s own camera, cut a section or a plan, colour it by depth, level or spatial class, and export it. The ratings above are read from this same geometry.</p>
+    <div id="m3dFramesWrap" class="m3d-frames" hidden>
+      <div class="eyebrow">Frame to model · select one</div>
+      <div class="gallery" id="m3dFrames"></div>
+    </div>
     <div class="m3d">
       <div class="m3d-stage">
         <div class="m3d-toolbar">
           <div class="seg" role="group" aria-label="What to model">
-            <button type="button" id="m3dScopeFrame" class="on">Whole frame</button>
+            <button type="button" id="m3dScopeFrame" class="on">Whole slab</button>
+            <button type="button" id="m3dScopeWindow" disabled>Analysed window</button>
             <button type="button" id="m3dScopeArea" disabled>Selected area</button>
           </div>
           <div class="seg" role="group" aria-label="View">
-            <button type="button" data-view="iso">Iso</button><button type="button" data-view="front">Front</button><button type="button" data-view="top">Top</button><button type="button" data-view="left">Left</button><button type="button" data-view="right">Right</button>
+            <button type="button" data-view="iso" class="on">Iso</button><button type="button" data-view="front">Front</button><button type="button" data-view="top">Top</button><button type="button" data-view="left">Left</button><button type="button" data-view="right">Right</button><button type="button" data-view="camera" title="Look through the render camera of the Blender scene" disabled>Render camera</button>
           </div>
           <label class="field"><input id="m3dTurntable" type="checkbox"> Turntable</label>
         </div>
-        <div id="m3dViewport" class="m3d-viewport"><p id="m3dEmpty" class="m3d-empty">Analyze a frame to build its 3D model.</p></div>
+        <div id="m3dViewport" class="m3d-viewport"><p id="m3dEmpty" class="m3d-empty">Pick a Blender frame to see its real 3D model.</p></div>
         <p id="m3dStats" class="status num"></p>
         <p id="m3dInfo" class="hint">Drag to orbit · right-drag or two fingers to pan · scroll or pinch to zoom · arrow keys pan.</p>
       </div>
       <aside class="m3d-panel" aria-label="3D model settings">
         <details open>
-          <summary>Build</summary>
-          <label>Depth reading
-            <select id="m3dDepth">
-              <option value="relief">Continuous relief · tone read 0–26 m</option>
-              <option value="bands">Four depth bands · 0 / 5.5 / 13.5 / 22 m</option>
-              <option value="flat">Flat silhouette · all mass at the front</option>
-            </select></label>
-          <label>Solid behind each cell
-            <select id="m3dSolid">
-              <option value="shell">Shell · the thickness below</option>
-              <option value="massing">Massing · solid to a common back plane</option>
-            </select></label>
-          <label>Thickness <input id="m3dThickness" type="range" min="1" max="9" step="1" value="3"><output id="m3dThicknessValue">3 m</output></label>
-        </details>
-        <details open>
           <summary>Look</summary>
+          <label>Style
+            <select id="m3dStyle">
+              <option value="cubes">Cubes · every cube of the lattice</option>
+              <option value="blocks">Blocks · fused solid, smooth</option>
+            </select></label>
+          <label>Cube sizes
+            <select id="m3dSizes">
+              <option value="actual">As grown · the size Blender gave each cube</option>
+              <option value="full">Full size · every cube over the threshold</option>
+            </select></label>
           <label>Colour
             <select id="m3dColor">
-              <option value="image">Project the frame image</option>
-              <option value="bands">Depth greys · as the depth diagram</option>
+              <option value="depth">Depth · dark at the front, light at the back</option>
+              <option value="render">Studio render · black front, grey depth, unlit</option>
+              <option value="foam">White study model</option>
+              <option value="size">Cube size · red near the threshold</option>
               <option value="class">Spatial classes · pockets, streets, bridges</option>
               <option value="level">Levels · 3 m floors</option>
             </select></label>
-          <label><input id="m3dEdges" type="checkbox" checked> Edge lines</label>
-          <label><input id="m3dModuleGrid" type="checkbox" checked> 9 × 3 m module grid</label>
+          <label hidden><input id="m3dEdges" type="checkbox"> Edge lines</label>
+          <label><input id="m3dOverlays" type="checkbox" checked> Analysis overlays · module grid, window, area</label>
           <label><input id="m3dShadows" type="checkbox" checked> Shadows</label>
           <ul class="legend" id="m3dLegend"></ul>
         </details>
@@ -213,13 +240,15 @@
           <summary>Export</summary>
           <div class="m3d-exports">
             <button type="button" id="m3dSnapshot" class="btn">Image · PNG</button>
+            <button type="button" id="m3dRecord" class="btn">Turntable · video</button>
             <button type="button" id="m3dExportOBJ" class="btn quiet">Model · OBJ</button>
-            <button type="button" id="m3dExportSTL" class="btn quiet">Print · STL</button>
             <button type="button" id="m3dExportGLB" class="btn quiet">Model · GLB</button>
+            <button type="button" id="m3dExportSTL" class="btn quiet">Print · STL</button>
           </div>
-          <p class="hint">Metres; X across, Y up, Z toward you. OBJ and GLB carry the colours and the projected image; STL is the bare solid for printing or Rhino.</p>
+          <label>Turn length <input id="m3dTurnSeconds" type="range" min="4" max="30" step="1" value="8" oninput="this.nextElementSibling.textContent=this.value+' s'"><output>8 s</output></label>
+          <p class="hint">Metres; X along the slab, Y up, Z toward you. OBJ and GLB carry the colours; STL is the bare solid for printing or Rhino. The video is one full turn recorded from the viewport.</p>
         </details>
-        <p class="hint">What this is: an interpretation of one picture. Tone sets the depth of the first mass only — nothing behind it is recovered — so treat the model as a study of the face, not a survey of rooms.</p>
+        <p class="hint">Where the geometry comes from: <code>blender/export_frame.py</code> in the repository, run inside Blender on the slab file, writes one small <code>frame_NNNN.json</code> per frame. Drop those files on “Blender frames” at the top of the page, or pick a frame from the built-in library.</p>
       </aside>
     </div>
   </section>
@@ -251,7 +280,7 @@
         <p class="hint">The selected area can be modelled in the 3D generator above: its cells become a relief at the depths the tones imply, the frame image is projected onto it, and the cut A–A becomes a live section plane you can orbit around.</p>
         <div class="space-toolbar">
           <button type="button" id="spaceModelArea" class="btn">Model this area in 3D</button>
-          <button type="button" id="spaceModelFrame" class="btn quiet">Model the whole frame</button>
+          <button type="button" id="spaceModelFrame" class="btn quiet">Model the whole picture</button>
         </div>
       </article>
       <p class="space-assumption"><strong>Reconstruction assumptions.</strong> A single render cannot recover the real interior. The section places visible mass at estimated depths of 0, 5.5, 13.5 or 22 m from the tone bands, then gives it the solid depth you choose; the 3D generator can additionally read the tone continuously (0–26 m) for a smoother relief. Unmodeled space is not a verified room or opening. Level lines are reference datums, not detected floors.</p>

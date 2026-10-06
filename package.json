@@ -2,7 +2,7 @@
   "name": "protospace-analyzer",
   "version": "1.0.0",
   "private": true,
-  "description": "Rate a render of the cube slab on twelve spatial descriptors and build a 3D model of any frame.",
+  "description": "Rate a render of the cube slab on twelve spatial descriptors, and rate and model the real Blender geometry of any frame.",
   "scripts": {
     "start": "npx serve . -l 3000",
     "dev": "npx serve . -l 3000"
