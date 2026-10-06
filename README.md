@@ -1,13 +1,34 @@
 # ProtoSpace Analyzer
 
 A browser app for an FAU architecture studio project (Design 7, "Proto-Architectural
-Spaces"). Import a render, GIF or video of the cube slab and rate any frame 0–100 on the
-studio's twelve descriptors, with every number explained — or go one step further: export
-the frame you want **from Blender** and the app rates and models its *real* cube lattice,
-in 3D, with the render's own camera, section and plan cuts, and OBJ / STL / GLB export.
+Spaces"). The Blender voxel animation runs **live in the browser** — pick the field (Noise or
+Voronoi), scrub or play the frames, change every modifier of the geometry-nodes group — and
+any frame is rated 0–100 on the studio's twelve descriptors, modelled in 3D with the render's
+own camera, section and plan cuts, and exported (PNG, video, OBJ, GLB, STL, or the settings
+as a .py for Blender). Renders, GIFs and videos can still be imported and rated from the
+picture, and frames exported from Blender can be dropped in.
 
 Everything runs in the browser — there is no build step and no server code. Files you
 import never leave your device. Live at the Vercel deployment of this repository.
+
+## The tabs
+
+- **Generator** — the animation itself. `js/field.js` is a port of the "ProtoSpace Voxel
+  Controls" node group: Blender's own Perlin noise (Jenkins lookup3 hash, 0.982 scaling, fBM
+  with detail / roughness / lacunarity / distortion) and 4D Voronoi F1 (PCG hash, Euclidean /
+  Manhattan / Chebychev, randomness, W, detail), the two-offset cross-fade that makes the loop
+  seamless, the growth ramp (grow from → full size at), invert, size steps, smallest / largest
+  cube, and a keyframed Offset axis with Blender's Bezier easing. Checked against frames
+  exported from the .blend: 99.6–99.99 % of cubes agree (the rest is 4-bit export rounding).
+  A pool of Web Workers evaluates the 72,447 points of the slab per frame; the viewer, the
+  twelve live ratings and the exports follow. *Use this frame* sends it into the analysis.
+  Presets: your Blender scene (read from the file), the original Noise loop.
+- **Import** — pictures, GIFs and videos (rated from the picture, as before), Blender frame
+  files, and the built-in library of 250 exported frames.
+- **Analyze** — the ratings, the evidence and the method notes.
+- **Review** — the qualitative review and the combined assessment.
+- **3D model** — the real lattice of the current frame.
+- **Spatial study** — the best window, its section, and the area in 3D.
 
 ## What it does
 
@@ -89,7 +110,11 @@ css/style.css         All styles (light and dark)
 js/analyzer.js        PSA — reads a render as a depth grid and measures the 12 descriptors
 js/rubric.js          PSARubric — qualitative interpretation rules and combined scoring
 js/space.js           PSASpace — window search, section drawing
-js/model3d.js         PSModel3D — the Three.js model of a Blender frame (ES module)
+js/field.js           The pattern field: Blender-exact noise / Voronoi, loop, growth (ES module, also in Node)
+js/gen.worker.js      Web Worker evaluating depth slices of the field
+js/generator.js       The Generator tab: controls, timeline, workers, live ratings, exports
+js/viewer.js          createViewer() — the Three.js lattice viewer used by the Generator and 3D model tabs
+js/model3d.js         The 3D-model tab's viewer instance (window.PSModel3D)
 js/app.js             Page logic: importing, media player, Blender frames, rendering, review, spatial study
 js/data.js            Calibration data: criteria text, agreement, the 1,250-zone database
 blender/export_frame.py   The Blender exporter (see above)

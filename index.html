@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ProtoSpace Analyzer</title>
-<meta name="description" content="Rate a render of the cube slab on twelve spatial descriptors, review the evidence, and build a 3D model of any frame of the animation.">
+<meta name="description" content="The Blender voxel animation live in the browser: grow the slab with a Noise or Voronoi field, rate any frame on twelve spatial descriptors and model it in 3D.">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;700&display=swap">
@@ -14,13 +14,48 @@
 </script>
 </head>
 <body>
-<nav class="topbar" aria-label="Sections">
-  <a class="brand" href="#top">ProtoSpace <span>Analyzer</span></a>
-  <div class="links">
-    <a href="#top">Import</a><a href="#mediaPanel" id="navMedia" hidden>Animation</a><a href="#bench">Analyze</a><a href="#why">Why</a><a href="#reviewPanel">Review</a><a href="#model3d">3D model</a><a href="#spaceExplorer">Spatial study</a>
+<nav class="topbar" aria-label="Tabs">
+  <a class="brand" href="#generator">ProtoSpace <span>Analyzer</span></a>
+  <div class="links tabs" role="tablist">
+    <a href="#generator" data-tab="generator" role="tab">Generator</a><a href="#import" data-tab="import" role="tab">Import</a><a href="#analyze" data-tab="analyze" role="tab">Analyze</a><a href="#review" data-tab="review" role="tab">Review</a><a href="#model" data-tab="model" role="tab">3D model</a><a href="#study" data-tab="study" role="tab">Spatial study</a>
   </div>
 </nav>
 <div class="wrap" id="top">
+
+<div class="tab" data-tab="generator">
+  <section id="generator" aria-labelledby="genTitle">
+    <div class="eyebrow">Generator · the Blender animation, live</div>
+    <h2 id="genTitle">Grow the slab</h2>
+    <p class="lede">The geometry-nodes animation, running in the browser: a grid of points fills the slab, a Noise or Voronoi field grows a cube on each point, and the field slides through the slab over one seamless loop. Pick the field, move through the frames, change the modifiers — every control of the Blender group is here with the same meaning — and the model, the twelve ratings and the exports follow in real time. <strong>Use this frame</strong> sends it into the analysis; the <strong>.py</strong> writes the same settings back onto the Blender modifier.</p>
+    <div class="gen">
+      <div class="gen-stage">
+        <div class="gen-timeline">
+          <button type="button" class="btn" id="genPlay">Play</button>
+          <button type="button" class="btn quiet" id="genPrev" aria-label="Previous frame">‹</button>
+          <button type="button" class="btn quiet" id="genNext" aria-label="Next frame">›</button>
+          <label class="field" style="flex:1;min-width:200px">Frame <input id="genFrame" type="range" min="1" max="250" step="1" value="1" style="width:100%"></label>
+          <input id="genFrameNumber" type="number" min="1" max="250" value="1" class="num" style="width:72px;font:inherit;padding:4px 6px;border:1.5px solid var(--rule);background:var(--bg);color:var(--ink)">
+          <output id="genFrameOut" class="num hint">frame 1</output>
+          <label class="field">fps <select id="genFps"><option value="6">6</option><option value="12">12</option><option value="24" selected>24</option></select></label>
+        </div>
+        <div id="genViewer"></div>
+        <p id="genStatus" class="status num"></p>
+        <div class="gen-actions">
+          <button type="button" class="btn" id="genUse">Use this frame → analyze</button>
+          <button type="button" class="btn quiet" id="genDownload">Download frame · .json</button>
+        </div>
+        <div class="gen-live">
+          <div class="eyebrow">Live ratings · quantitative, from this frame’s lattice</div>
+          <div id="genRatings" class="gen-ratings"></div>
+          <p class="hint">Every descriptor is re-read from the generated cube lattice as you move. The full assessment — qualitative interpretation, evidence, review — opens in Analyze once you use the frame.</p>
+        </div>
+      </div>
+      <aside class="gen-panel" id="genControls" aria-label="Generator controls"></aside>
+    </div>
+  </section>
+</div>
+
+<div class="tab" data-tab="import" hidden>
   <header>
     <div class="eyebrow">ProtoSpace · descriptor analyzer</div>
     <h1>Descriptor Analyzer</h1>
@@ -71,7 +106,6 @@
 
   <hr class="rule">
 
-
   <section id="mediaPanel" hidden aria-label="GIF and video player" style="margin-bottom:32px;border:1px solid var(--rule);padding:20px">
     <h2 style="margin:0 0 12px;font-size:18px">Explore an animation</h2>
     <p id="mediaName" style="overflow-wrap:anywhere"></p>
@@ -89,6 +123,11 @@
     <p id="mediaStatus" class="status" role="status" aria-live="polite"></p>
     <p class="hint">Pause or drag the timeline, then analyze the displayed frame. GIFs step one frame; videos step 0.1 seconds. “Open the Blender frame of this moment” loads the real geometry of the matching frame (frame = seconds × 24 + 1) from the Blender library. Saved frames appear in Imported iterations. Files are processed on this device.</p>
   </section>
+</div>
+
+<div class="tab" data-tab="analyze" hidden>
+  <div class="eyebrow">Analyze · the current frame in the ratings</div>
+  <h2 class="tabTitle">Descriptor ratings</h2>
   <section class="bench" id="bench">
     <div class="viewer">
       <div class="viewbar">
@@ -132,7 +171,7 @@
         <p class="lead" id="qualCardLabel">Pending review</p>
         <p id="qualCardCriteria"></p>
         <p class="kv" id="qualCardEvidence" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
-        <a href="#reviewPanel" class="btn quiet" style="display:inline-block">See interpretation and rules</a>
+        <a href="#review" class="btn quiet" style="display:inline-block">See interpretation and rules</a>
       </article>
       <article class="card">
         <h3>Quantitative evidence · weighted image metrics</h3>
@@ -145,7 +184,33 @@
     <p class="agree" id="agree"></p>
   </section>
 
+  <section class="method">
+    <div>
+      <h4>How the image is read</h4>
+      <p>The cube lattice gives the scale — 1 cube = 1 m — and every metre of the face is classed by its tone, which in these renders tracks how deep the first cube sits: black at the front, mid grey a few metres back, light grey deep in a recess, white where you see straight through. Modules are 9 × 9 m, floors 3 m; the module grid is fitted where the full/empty reading is clearest.</p>
+      <p>Rubric v3: quantitative scores are the sum of each normalized metric multiplied by its displayed weight. A score of 100 means every target is met. These targets are inherited project assumptions, not universal architectural standards; they have not been independently validated. Recognition compares the import with all 250 frames.</p>
+    </div>
+    <div>
+      <h4>Depth diagram</h4>
+      <ul class="legend">
+        <li><span class="sw" style="background:#111"></span>mass at the front (nearest the camera)</li>
+        <li><span class="sw" style="background:#565656"></span>first mass 3–8 m back</li>
+        <li><span class="sw" style="background:#929292"></span>recess 9–18 m deep</li>
+        <li><span class="sw" style="background:#c8c8c8"></span>recess 19 m or deeper</li>
+        <li><span class="sw"></span>see-through</li>
+        <li><span class="sw hatch"></span>gathering pocket (recess of 12 m² or more)</li>
+        <li><span class="sw bar"></span>street (floor-level recess of 5 m or more) · thinner = bridge</li>
+      </ul>
+    </div>
+    <div>
+      <h4>Quantitative and qualitative ratings</h4>
+      <p>The quantitative rating measures geometry visible in the image. The qualitative rating automatically interprets two visible spatial patterns for each descriptor and generates a written explanation. It uses local rules applied to the same measurements, so it is not an independent second opinion or a vision-language AI review. It cannot verify actual use, comfort or behavior.</p>
+      <p>Each automatic criterion combines the normalized metrics named in its explanation: minimum for patterns requiring all features, mean for a single feature, or geometric mean for the balanced neighborhood mix. Strength below 0.2 scores 0; 0.2–below 0.4 scores 1; 0.4–below 0.6 scores 2; 0.6–below 0.8 scores 3; 0.8–1 scores 4. The mean is multiplied by 25 to produce a score out of 100. The combined assessment below uses 70% quantitative and 30% qualitative. Compare frames using the same crop, scale and view.</p>
+    </div>
+  </section>
+</div>
 
+<div class="tab" data-tab="review" hidden>
   <section id="reviewPanel" aria-labelledby="reviewHeading" style="margin-top:32px;border-top:2px solid var(--ink);padding-top:20px">
     <div class="eyebrow">Rubric v3 · quantitative + qualitative</div>
     <h2 id="reviewHeading">Qualitative review</h2>
@@ -175,84 +240,23 @@
     <p class="hint">All descriptors are assessed automatically. Select one in the ratings list to inspect or edit its interpretation. Download the assessment before closing this page; assessments are held in this session only.</p>
     <button id="reviewExport" type="button" class="btn" style="margin-top:12px">Download assessment (JSON)</button>
   </section>
+</div>
 
+<div class="tab" data-tab="model" hidden>
   <section id="model3d" aria-labelledby="m3dTitle">
     <div class="eyebrow">Blender frame → 3D · the real geometry</div>
     <h2 id="m3dTitle">The 3D model of this frame</h2>
-    <p class="lede">The cube lattice of the frame, straight from Blender — every point of the slab with the size of the cube that grew on it, nothing inferred from a picture. Orbit it, look through the render’s own camera, cut a section or a plan, colour it by depth, level or spatial class, and export it. The ratings above are read from this same geometry.</p>
+    <p class="lede">The cube lattice of the frame — generated here, or exported from Blender — with nothing inferred from a picture. Orbit it, look through the render’s own camera, cut a section or a plan, colour it by depth, level or spatial class, and export it. The ratings in Analyze are read from this same geometry.</p>
     <div id="m3dFramesWrap" class="m3d-frames" hidden>
       <div class="eyebrow">Frame to model · select one</div>
       <div class="gallery" id="m3dFrames"></div>
     </div>
-    <div class="m3d">
-      <div class="m3d-stage">
-        <div class="m3d-toolbar">
-          <div class="seg" role="group" aria-label="What to model">
-            <button type="button" id="m3dScopeFrame" class="on">Whole slab</button>
-            <button type="button" id="m3dScopeWindow" disabled>Analysed window</button>
-            <button type="button" id="m3dScopeArea" disabled>Selected area</button>
-          </div>
-          <div class="seg" role="group" aria-label="View">
-            <button type="button" data-view="iso" class="on">Iso</button><button type="button" data-view="front">Front</button><button type="button" data-view="top">Top</button><button type="button" data-view="left">Left</button><button type="button" data-view="right">Right</button><button type="button" data-view="camera" title="Look through the render camera of the Blender scene" disabled>Render camera</button>
-          </div>
-          <label class="field"><input id="m3dTurntable" type="checkbox"> Turntable</label>
-        </div>
-        <div id="m3dViewport" class="m3d-viewport"><p id="m3dEmpty" class="m3d-empty">Pick a Blender frame to see its real 3D model.</p></div>
-        <p id="m3dStats" class="status num"></p>
-        <p id="m3dInfo" class="hint">Drag to orbit · right-drag or two fingers to pan · scroll or pinch to zoom · arrow keys pan.</p>
-      </div>
-      <aside class="m3d-panel" aria-label="3D model settings">
-        <details open>
-          <summary>Look</summary>
-          <label>Style
-            <select id="m3dStyle">
-              <option value="cubes">Cubes · every cube of the lattice</option>
-              <option value="blocks">Blocks · fused solid, smooth</option>
-            </select></label>
-          <label>Cube sizes
-            <select id="m3dSizes">
-              <option value="actual">As grown · the size Blender gave each cube</option>
-              <option value="full">Full size · every cube over the threshold</option>
-            </select></label>
-          <label>Colour
-            <select id="m3dColor">
-              <option value="depth">Depth · dark at the front, light at the back</option>
-              <option value="render">Studio render · black front, grey depth, unlit</option>
-              <option value="foam">White study model</option>
-              <option value="size">Cube size · red near the threshold</option>
-              <option value="class">Spatial classes · pockets, streets, bridges</option>
-              <option value="level">Levels · 3 m floors</option>
-            </select></label>
-          <label hidden><input id="m3dEdges" type="checkbox"> Edge lines</label>
-          <label><input id="m3dOverlays" type="checkbox" checked> Analysis overlays · module grid, window, area</label>
-          <label><input id="m3dShadows" type="checkbox" checked> Shadows</label>
-          <ul class="legend" id="m3dLegend"></ul>
-        </details>
-        <details open>
-          <summary>Cut</summary>
-          <label><input id="m3dSection" type="checkbox"> Section plane (across)</label>
-          <label hidden>Cut at <input id="m3dSectionX" type="range" min="0" max="10" step="1" value="5" data-fresh="1"><output id="m3dSectionValue"></output> <button type="button" id="m3dSectionFlip" class="btn quiet" title="Keep the other side">Flip</button></label>
-          <label><input id="m3dPlan" type="checkbox"> Plan cut (level)</label>
-          <label hidden>Cut at <input id="m3dPlanY" type="range" min="0" max="10" step="1" value="5" data-fresh="1"><output id="m3dPlanValue"></output> <button type="button" id="m3dPlanFlip" class="btn quiet" title="Keep the other side">Flip</button></label>
-          <p class="hint">Cuts clip the model live; the orange sheet marks the plane. Combine both for a cut-away corner.</p>
-        </details>
-        <details open>
-          <summary>Export</summary>
-          <div class="m3d-exports">
-            <button type="button" id="m3dSnapshot" class="btn">Image · PNG</button>
-            <button type="button" id="m3dRecord" class="btn">Turntable · video</button>
-            <button type="button" id="m3dExportOBJ" class="btn quiet">Model · OBJ</button>
-            <button type="button" id="m3dExportGLB" class="btn quiet">Model · GLB</button>
-            <button type="button" id="m3dExportSTL" class="btn quiet">Print · STL</button>
-          </div>
-          <label>Turn length <input id="m3dTurnSeconds" type="range" min="4" max="30" step="1" value="8" oninput="this.nextElementSibling.textContent=this.value+' s'"><output>8 s</output></label>
-          <p class="hint">Metres; X along the slab, Y up, Z toward you. OBJ and GLB carry the colours; STL is the bare solid for printing or Rhino. The video is one full turn recorded from the viewport.</p>
-        </details>
-        <p class="hint">Where the geometry comes from: <code>blender/export_frame.py</code> in the repository, run inside Blender on the slab file, writes one small <code>frame_NNNN.json</code> per frame. Drop those files on “Blender frames” at the top of the page, or pick a frame from the built-in library.</p>
-      </aside>
-    </div>
+    <div id="model3dViewer"></div>
+    <p class="hint" style="margin-top:14px">Where the geometry comes from: the Generator tab (the animation itself), the built-in library of 250 exported frames, or <code>blender/export_frame.py</code> run inside Blender on any scene — drop its <code>frame_NNNN.json</code> on the Import tab.</p>
   </section>
+</div>
 
+<div class="tab" data-tab="study" hidden>
   <section id="spaceExplorer" aria-labelledby="spaceTitle">
     <div class="eyebrow">Spatial study · select, section, explore</div>
     <h2 id="spaceTitle">Find a space worth exploring</h2>
@@ -286,37 +290,15 @@
       <p class="space-assumption"><strong>Reconstruction assumptions.</strong> A single render cannot recover the real interior. The section places visible mass at estimated depths of 0, 5.5, 13.5 or 22 m from the tone bands, then gives it the solid depth you choose; the 3D generator can additionally read the tone continuously (0–26 m) for a smoother relief. Unmodeled space is not a verified room or opening. Level lines are reference datums, not detected floors.</p>
     </div>
   </section>
-  <section class="method">
-    <div>
-      <h4>How the image is read</h4>
-      <p>The cube lattice gives the scale — 1 cube = 1 m — and every metre of the face is classed by its tone, which in these renders tracks how deep the first cube sits: black at the front, mid grey a few metres back, light grey deep in a recess, white where you see straight through. Modules are 9 × 9 m, floors 3 m; the module grid is fitted where the full/empty reading is clearest.</p>
-      <p>Rubric v3: quantitative scores are the sum of each normalized metric multiplied by its displayed weight. A score of 100 means every target is met. These targets are inherited project assumptions, not universal architectural standards; they have not been independently validated. Recognition compares the import with all 250 frames.</p>
-    </div>
-    <div>
-      <h4>Depth diagram</h4>
-      <ul class="legend">
-        <li><span class="sw" style="background:#111"></span>mass at the front (nearest the camera)</li>
-        <li><span class="sw" style="background:#565656"></span>first mass 3–8 m back</li>
-        <li><span class="sw" style="background:#929292"></span>recess 9–18 m deep</li>
-        <li><span class="sw" style="background:#c8c8c8"></span>recess 19 m or deeper</li>
-        <li><span class="sw"></span>see-through</li>
-        <li><span class="sw hatch"></span>gathering pocket (recess of 12 m² or more)</li>
-        <li><span class="sw bar"></span>street (floor-level recess of 5 m or more) · thinner = bridge</li>
-      </ul>
-    </div>
-    <div>
-      <h4>Quantitative and qualitative ratings</h4>
-      <p>The quantitative rating measures geometry visible in the image. The qualitative rating automatically interprets two visible spatial patterns for each descriptor and generates a written explanation. It uses local rules applied to the same measurements, so it is not an independent second opinion or a vision-language AI review. It cannot verify actual use, comfort or behavior.</p>
-      <p>Each automatic criterion combines the normalized metrics named in its explanation: minimum for patterns requiring all features, mean for a single feature, or geometric mean for the balanced neighborhood mix. Strength below 0.2 scores 0; 0.2–below 0.4 scores 1; 0.4–below 0.6 scores 2; 0.6–below 0.8 scores 3; 0.8–1 scores 4. The mean is multiplied by 25 to produce a score out of 100. The combined assessment below uses 70% quantitative and 30% qualitative. Compare frames using the same crop, scale and view.</p>
-    </div>
-  </section>
 </div>
 
+</div>
 <script src="js/data.js"></script>
 <script src="js/analyzer.js"></script>
 <script src="js/rubric.js"></script>
 <script src="js/space.js"></script>
 <script src="js/app.js"></script>
 <script type="module" src="js/model3d.js"></script>
+<script type="module" src="js/generator.js"></script>
 </body>
 </html>

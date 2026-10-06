@@ -120,7 +120,7 @@
     video.removeAttribute('src'); video.load();
     if (M.url) URL.revokeObjectURL(M.url);
     M.url = null; M.busy = false; M.name = file.name;
-    $('#mediaPanel').hidden = false; $('#navMedia').hidden = false; $('#mediaName').textContent = file.name;
+    $('#mediaPanel').hidden = false; $('#mediaName').textContent = file.name;
     $('#mediaStatus').textContent = 'Loading media…';
     M.kind = file.type === 'image/gif' || /\.gif$/i.test(file.name) ? 'gif' : 'video';
     video.hidden = M.kind !== 'video'; gif.hidden = M.kind !== 'gif';
@@ -195,7 +195,7 @@
     const frame = M.kind === 'gif' ? M.index + 1 : Math.round(video.currentTime * fps) + 1;
     const n = VOX.library ? Math.max(VOX.library.min, Math.min(VOX.library.max, frame)) : frame;
     $('#mediaStatus').textContent = `Loading Blender frame ${n} (${M.kind === 'gif' ? 'GIF frame ' + (M.index + 1) : stamp(video.currentTime) + ' at ' + fps + ' fps'})…`;
-    if (window.PSModel3D) PSModel3D.scrollAfterNextBuild();
+    S.openModel = true;
     loadLibraryFrame(n).catch(err => { $('#mediaStatus').textContent = 'No Blender frame for this moment: ' + err.message; });
   };
 
@@ -213,7 +213,8 @@
   }
 
   // ---- Blender frames: the cube lattice of a frame, exported with blender/export_frame.py
-  const VOX = { threshold: 8, library: null, cache: new Map(), fps: 24, libraryItem: null };
+  const VOX = { thresholdFrac: 8 / 15, library: null, cache: new Map(), fps: 24, libraryItem: null };
+  const thrOf = vox => Math.round(VOX.thresholdFrac * vox.max);
   const CELL = 12;                                                   // screen pixels per cube in the synthetic elevation
   const TONE_OF_DEPTH = [[0, 0.02], [3, 0.09], [8.5, 0.20], [18, 0.40], [26, 0.70]];
   function toneOfDepth(d) {                                          // inverse of the analyzer's tone → depth calibration
@@ -226,7 +227,7 @@
     const [nx, ny, nz] = data.dims, n = nx * ny * nz, raw = atob(data.sizes), sizes = new Uint8Array(n);
     if (data.size_bits === 8) { for (let i = 0; i < n; i++) sizes[i] = raw.charCodeAt(i); }
     else for (let i = 0; i < n; i++) { const b = raw.charCodeAt(i >> 1); sizes[i] = (i & 1) ? (b >> 4) & 15 : b & 15; }
-    return { nx, ny, nz, sizes };
+    return { nx, ny, nz, sizes, max: data.size_bits === 8 ? 255 : 15 };
   }
   function voxelCamera(data) {
     const c = data.camera; if (!c || !c.position) return null;
@@ -241,16 +242,21 @@
     const frame = data.frame;
     return { id: Math.random().toString(36).slice(2), name: name || `Blender frame ${String(frame).padStart(4, '0')}`, kind: 'voxels', frame, data, vox, camera: voxelCamera(data), ready: false, isExample: false };
   }
-  function prepareVoxel(item) {
-    const { nx, ny, nz, sizes } = item.vox, thr = VOX.threshold;
-    // the elevation the analyzer reads: every column at the tone of its first solid cube
+  /* the elevation the analyzer reads: every column at the tone of its first solid cube */
+  function voxGrid(vox, thr) {
+    const { nx, ny, nz, sizes } = vox;
     const tone = new Float32Array(nx * ny), band = new Uint8Array(nx * ny), depth = new Int16Array(nx * ny).fill(-1);
     for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
       let z0 = -1; for (let z = 0; z < nz; z++) if (sizes[x + nx * (y + ny * z)] >= thr) { z0 = z; break; }
       const i = y * nx + x; depth[i] = z0;
       if (z0 < 0) { tone[i] = 1; band[i] = 4; } else { tone[i] = toneOfDepth(z0); band[i] = z0 < 3 ? 0 : z0 < 9 ? 1 : z0 < 19 ? 2 : 3; }
     }
-    item.fullGrid = { cols: nx, rows: ny, tone, band, pitch: CELL, px: 0, py: 0, invert: false, w: nx * CELL, h: ny * CELL, depth };
+    return { cols: nx, rows: ny, tone, band, pitch: CELL, px: 0, py: 0, invert: false, w: nx * CELL, h: ny * CELL, depth };
+  }
+  function prepareVoxel(item) {
+    const { nx, ny, nz, sizes } = item.vox, thr = thrOf(item.vox);
+    item.fullGrid = voxGrid(item.vox, thr);
+    const { tone, depth } = item.fullGrid;
     const c = document.createElement('canvas'); c.width = nx * CELL; c.height = ny * CELL;
     const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
     for (let y = 0; y < ny; y++) for (let x0 = 0; x0 < nx; x0++) {
@@ -279,7 +285,7 @@
     item.result = PSA.analyze(item.grid);
     item.R = { x0: c0 * CELL, y0: (G.rows - r0 - rows) * CELL, x1: (c0 + cols) * CELL, y1: (G.rows - r0) * CELL };
     item.voxWindow = { c0, r0 };
-    const reviewKey = JSON.stringify(['vox', item.frame, item.R, VOX.threshold]);
+    const reviewKey = JSON.stringify(['vox', item.frame, item.R, VOX.thresholdFrac]);
     if (item.reviewKey !== reviewKey) item.reviews = {};
     item.reviewKey = reviewKey;
     item.zone3D = null;
@@ -337,7 +343,7 @@
     const showThr = () => thrV.textContent = Math.round(+thr.value / 15 * 100) + '%';
     showThr();
     thr.addEventListener('input', showThr);
-    thr.addEventListener('change', () => { VOX.threshold = +thr.value; S.items.forEach(it => { if (it.kind === 'voxels') it.ready = false; }); if (S.current && S.current.kind === 'voxels') select(S.current); });
+    thr.addEventListener('change', () => { VOX.thresholdFrac = +thr.value / 15; S.items.forEach(it => { if (it.kind === 'voxels') it.ready = false; }); if (S.current && S.current.kind === 'voxels') select(S.current); window.dispatchEvent(new Event('psthreshold')); });
     const go = n => { n = Math.round(+n); if (!isFinite(n)) return; $('#voxLibraryStatus').textContent = `Loading frame ${n}…`; loadLibraryFrame(n).then(() => { $('#voxLibraryStatus').textContent = `Frame ${n} loaded: rated and modelled from its real cube lattice. Drag the slider to step through the animation.`; }).catch(err => { $('#voxLibraryStatus').textContent = err.message; }); };
     let t = null;
     $('#voxFrame').addEventListener('input', e => { $('#voxFrameNumber').value = e.target.value; clearTimeout(t); t = setTimeout(() => go(e.target.value), 180); });
@@ -458,8 +464,9 @@
   function renderCaption(item) {
     const m = item.match, el = $("#status");
     if (item.kind === 'voxels') {
-      const v = item.vox, d = item.data, solid = v.sizes.reduce((a, s) => a + (s >= VOX.threshold ? 1 : 0), 0);
-      el.textContent = `Blender frame ${d.frame} of ${d.source || 'the slab'} · ${v.nx} × ${v.ny} m slab, ${v.nz} m deep · ${solid.toLocaleString('en-US')} solid cubes at ≥ ${Math.round(VOX.threshold / 15 * 100)}% size · rated from the real cube lattice${item.region ? ' (the part you dragged)' : ''}. Drag a rectangle to rate only part of it.`;
+      const v = item.vox, d = item.data, thr = thrOf(v); let solid = 0; for (let i = 0; i < v.sizes.length; i++) if (v.sizes[i] >= thr) solid++;
+      const what = /generator/i.test(d.source || '') ? `Generated frame ${d.frame} (${d.settings ? d.settings.pattern : 'pattern'})` : `Blender frame ${d.frame} of ${d.source || 'the slab'}`;
+      el.textContent = `${what} · ${v.nx} × ${v.ny} m slab, ${v.nz} m deep · ${solid.toLocaleString('en-US')} solid cubes at ≥ ${Math.round(VOX.thresholdFrac * 100)}% size · rated from the real cube lattice${item.region ? ' (the part you dragged)' : ''}. Drag a rectangle to rate only part of it.`;
       return;
     }
     const px = (item.userPitch || item.pitch);
@@ -736,8 +743,9 @@
   function pushModel(item){
     if(!window.PSModel3D||!item||!item.result)return;
     const area=EX.chosen&&EX.item===item&&EX.result===item.result?{c:EX.chosen.c,r:EX.chosen.r,w:EX.chosen.w,h:EX.chosen.h}:null;
+    if(S.openModel){S.openModel=false;showTab('model');}
     if(item.kind==='voxels'){
-      PSModel3D.setSource({name:item.name,frame:item.frame,vox:{nx:item.vox.nx,ny:item.vox.ny,nz:item.vox.nz,sizes:item.vox.sizes,threshold:VOX.threshold},camera:item.camera,grid:item.grid,R:{c0:item.voxWindow.c0,r0:item.voxWindow.r0},result:item.result,area});
+      PSModel3D.setSource({name:item.name,frame:item.frame,vox:{nx:item.vox.nx,ny:item.vox.ny,nz:item.vox.nz,sizes:item.vox.sizes,max:item.vox.max,threshold:thrOf(item.vox)},camera:item.camera,grid:item.grid,R:{c0:item.voxWindow.c0,r0:item.voxWindow.r0},result:item.result,area});
       return;
     }
     const hint=item.recognised&&item.match.full?`This is a picture (recognised as frame ${item.match.frame} of the old renders).`:'This is a picture.';
@@ -820,8 +828,8 @@
     ['spaceObjective','spaceWidth','spaceHeight'].forEach(id=>$('#'+id).onchange=findExplorerArea);
     $('#spaceCut').oninput=()=>{drawSpaceOverview();drawSpaceSection();if(window.PSModel3D&&PSModel3D.ready&&PSModel3D.settings.scope==='area')PSModel3D.setSectionFromStudy(+$('#spaceCut').value+1,null);};
     $('#spaceThickness').oninput=()=>{if(!EX.chosen)return;drawSpaceSection();};
-    $('#spaceModelArea').onclick=()=>{if(!EX.chosen||!window.PSModel3D)return;pushArea();PSModel3D.setScope('area');PSModel3D.setSectionFromStudy(+$('#spaceCut').value+1,true);document.getElementById('model3d').scrollIntoView({behavior:'smooth',block:'start'});};
-    $('#spaceModelFrame').onclick=()=>{if(!window.PSModel3D)return;PSModel3D.setScope('picture');document.getElementById('model3d').scrollIntoView({behavior:'smooth',block:'start'});};
+    $('#spaceModelArea').onclick=()=>{if(!EX.chosen||!window.PSModel3D)return;pushArea();PSModel3D.setScope('area');PSModel3D.setSectionFromStudy(+$('#spaceCut').value+1,true);showTab('model');};
+    $('#spaceModelFrame').onclick=()=>{if(!window.PSModel3D)return;PSModel3D.setScope('frame');showTab('model');};
     $('#spaceSaveSection').onclick=()=>{if(EX.svg)downloadSpace(EX.svg,'image/svg+xml','ProtoSpace-inferred-section.svg');};
     window.addEventListener('resize',()=>{if(EX.chosen)drawSpaceOverview();});
   }
@@ -854,14 +862,41 @@
         it.region = region; analyzeItem(it); renderAll();
       } else drawView(it);
     });
-    window.addEventListener("resize", () => S.current && drawView(S.current));
+    window.addEventListener("resize", () => S.current && S.current.result && drawView(S.current));
   }
+
+  // ---- tabs: each section is its own view; the hash names the tab
+  const TAB_OF = { generator: 'generator', import: 'import', top: 'import', mediaPanel: 'import', blenderImport: 'import', analyze: 'analyze', bench: 'analyze', why: 'analyze', review: 'review', reviewPanel: 'review', model: 'model', model3d: 'model', study: 'study', spaceExplorer: 'study' };
+  function showTab(name) {
+    name = TAB_OF[name] || 'generator';
+    document.querySelectorAll('.tab[data-tab]').forEach(t => t.hidden = t.dataset.tab !== name);
+    document.querySelectorAll('.topbar a[data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === name));
+    if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+    window.scrollTo({ top: 0 });
+    if (S.current && S.current.result) { if (name === 'analyze') drawView(S.current); if (name === 'study' && EX.chosen && EX.item === S.current) { drawSpaceOverview(); drawSpaceSection(); } }
+    window.dispatchEvent(new Event('resize'));
+  }
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]'); if (!a) return;
+    const id = a.getAttribute('href').slice(1); if (!TAB_OF[id]) return;
+    e.preventDefault(); showTab(id);
+    if (id === 'reviewPanel') setTimeout(() => document.getElementById('reviewPanel').scrollIntoView({ block: 'start' }), 0);
+  });
+  window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
+  // what the Generator (js/generator.js) needs from the page
+  window.PSApp = {
+    thresholdFrac: () => VOX.thresholdFrac,
+    analyzeVox: (vox, thr) => { const grid = voxGrid(vox, thr); return { grid, result: PSA.analyze(grid) }; },
+    addGeneratedFrame: (data, name) => { const item = addVoxelData(data, name); if (item) showTab('analyze'); return item; },
+    showTab,
+  };
 
   // ---- boot
   wireExplorer();
   wire();
   wireVoxels();
   loadLibraryIndex();
+  showTab(location.hash.slice(1) || 'generator');
   setStatus("Loading the animation's 250 frames for recognition…");
   loadThumbs().then(th => {
     S.thumbs = th;

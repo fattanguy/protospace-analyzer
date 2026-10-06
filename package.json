@@ -2,7 +2,7 @@
   "name": "protospace-analyzer",
   "version": "1.0.0",
   "private": true,
-  "description": "Rate a render of the cube slab on twelve spatial descriptors, and rate and model the real Blender geometry of any frame.",
+  "description": "The Blender voxel animation live in the browser, rated on twelve spatial descriptors and modelled in 3D, frame by frame.",
   "scripts": {
     "start": "npx serve . -l 3000",
     "dev": "npx serve . -l 3000"
