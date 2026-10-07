@@ -10,6 +10,8 @@
      panelEl   an element to render the settings sections into (used by the Generator's dropdown)
      sections  which settings sections to show: ['look', 'crop', 'cut', 'export']
      overlay   true → the view buttons float inside the viewport
+     style     'cubes' (default) | 'blocks' — the fused solid
+     color     the colour mode to start in; view: the view to start in
      showBox   false hides the box's own outline (the crop still applies)
      onBox     fn(box | null) — the crop box changed ({ x0, x1, y0, y1, z0, z1 } in lattice cells, or null when off)
      onReady   fn(api) */
@@ -129,7 +131,7 @@ export function createViewer(root, opts = {}) {
     source: null, cells: null, mesh: null, base: null, hl: null, hlCells: null, boxLines: null, boxFill: null, planes: {}, light: null, fill: null, hemi: null,
     bbox: null, raf: null, visible: true, pending: null, viewName: opts.view || 'iso', recording: null, lastKey: '', boxTimer: null,
     box: { on: false, outline: false, size: 24, x0: 0, x1: 1, y0: 0, y1: 1, z0: 0, z1: 1 },
-    settings: { style: 'cubes', sizes: 'actual', color: opts.color || 'depth', shadows: true, section: false, sectionX: 0, sectionFlip: false, plan: false, planY: 0, planFlip: false, turntable: false },
+    settings: { style: opts.style || 'cubes', sizes: 'actual', color: opts.color || 'depth', shadows: true, section: false, sectionX: 0, sectionFlip: false, plan: false, planY: 0, planFlip: false, turntable: false },
   };
 
   // ------------------------------------------------------------------ init
@@ -166,7 +168,7 @@ export function createViewer(root, opts = {}) {
 
     M.hemi = new THREE.HemisphereLight(0xffffff, 0xb5aea6, 1.05); scene.add(M.hemi);
     const sun = new THREE.DirectionalLight(0xffffff, 2.3);
-    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.03; sun.shadow.radius = 3;
+    sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.001; sun.shadow.normalBias = 0.12; sun.shadow.radius = 3;
     scene.add(sun); scene.add(sun.target); M.light = sun;
     M.fill = new THREE.DirectionalLight(0xffffff, 0.45); M.fill.position.set(60, 20, -40); scene.add(M.fill);
 
@@ -432,7 +434,7 @@ export function createViewer(root, opts = {}) {
     const s = M.settings, v = M.source.vox, unlit = s.color === 'render', b = M.box;
     empty.hidden = C.cells.length > 0;
     if (!C.cells.length) { empty.textContent = b.on && !b.outline ? 'Nothing solid inside the box — move it or make it bigger.' : 'No cube reaches the mass threshold, so there is nothing to model.'; }
-    const matOpts = { side: THREE.DoubleSide, clipShadows: true };
+    const matOpts = { side: THREE.DoubleSide, shadowSide: THREE.BackSide, clipShadows: true };
     let cubeCount = 0, tris = 0;
     if (C.cells.length) {
       if (s.style === 'cubes') {
@@ -491,9 +493,10 @@ export function createViewer(root, opts = {}) {
       p.rotation.set(-Math.PI / 2, 0, 0); p.position.set(v.nx / 2, s.planY, -depth / 2 + 0.5);
     } else M.planes.plan.visible = false;
     if (b.on && !b.outline) {                                                   // instant crop while the box moves; the rebuild makes it exact
-      planes.push(new THREE.Plane(new THREE.Vector3(1, 0, 0), -b.x0), new THREE.Plane(new THREE.Vector3(-1, 0, 0), b.x1),
-        new THREE.Plane(new THREE.Vector3(0, 1, 0), -b.y0), new THREE.Plane(new THREE.Vector3(0, -1, 0), b.y1),
-        new THREE.Plane(new THREE.Vector3(0, 0, 1), b.z1), new THREE.Plane(new THREE.Vector3(0, 0, -1), -b.z0));
+      const e = 0.05;                                                           // a hair outside the box, so the fused faces on its boundary are not on the clip planes
+      planes.push(new THREE.Plane(new THREE.Vector3(1, 0, 0), -(b.x0 - e)), new THREE.Plane(new THREE.Vector3(-1, 0, 0), b.x1 + e),
+        new THREE.Plane(new THREE.Vector3(0, 1, 0), -(b.y0 - e)), new THREE.Plane(new THREE.Vector3(0, -1, 0), b.y1 + e),
+        new THREE.Plane(new THREE.Vector3(0, 0, 1), b.z1 + e), new THREE.Plane(new THREE.Vector3(0, 0, -1), -(b.z0 - e)));
     }
     for (const o of [M.mesh, M.hl]) if (o) { o.material.clippingPlanes = planes; o.material.needsUpdate = true; }
     const sxl = V('sectionX'); if (sxl) { sxl.parentElement.hidden = !s.section; V('sectionValue').textContent = s.sectionX + ' m'; }

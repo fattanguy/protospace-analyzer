@@ -21,9 +21,8 @@ Live at the Vercel deployment of this repository.
   live.
 - **Analyze** — pick an animation (what is on screen in the Generator, the built-in Blender
   scene and Noise loop, or any animation you saved) and a frame. The frame is shown as a
-  white model with shadows; pick one of its five bays (the model zooms to that bay alone)
-  or the whole frame to rate, and tick *Depth diagram* to see the flat reading behind the
-  ratings with what the selected rating looks at drawn on it. Each rating has a one-line
+  white solid model with shadows; pick one of its five bays (the model zooms to that bay
+  alone) or the whole frame to rate. Each rating has a one-line
   question, a score, what the frame shows, what was measured and how to raise it. The full
   rubric-v3 assessment (editable interpretation, combined score, JSON download) and the
   method notes are folded away underneath.

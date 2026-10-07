@@ -53,7 +53,7 @@ function voxGrid(vox, thr, box) {
 }
 function analyzeVox(vox, thr, box) { const grid = voxGrid(vox, thr, box); return { grid, result: PSA.analyze(grid) }; }
 // ------------------------------------------------------------------ state
-const A = { animId: 'current', frame: 61, item: null, word: 'Modular', win: null, depth: false, token: 0, dirty: false, tab: 'generator', model: null, anv: null, boxTimer: null,
+const A = { animId: 'current', frame: 61, item: null, word: 'Modular', win: null, token: 0, dirty: false, tab: 'generator', model: null, anv: null, boxTimer: null,
   bay: null, hl: 'none', progDepth: false, progWord: 'Modular', pv: null, scan: null };
 // the five bays of a frame (the same ones the Program tab rates): equal parts across the slab, the full height and depth
 function winBox(vox, i) { if (i == null) return null; const b = bayBoxes(vox)[i]; return b ? { x0: b.x0, x1: b.x1, y0: 0, y1: vox.ny, z0: 0, z1: vox.nz } : null; }
@@ -126,7 +126,7 @@ function renderAll() {
   const it = A.item; if (!it) return;
   const base = `${it.name} · ${it.vox.nx} × ${it.vox.ny} m slab, ${it.vox.nz} m deep · ${it.solid.toLocaleString('en-US')} solid cubes`;
   setStatus(`${base} · rating ${winLabel(it.vox, A.win)}`, base);
-  renderRatings(it); renderWhy(it); drawView(it);
+  renderRatings(it); renderWhy(it);
   const src = { name: it.name, frame: it.frame, vox: it.vox, camera: it.camera, result: it.result };
   if (A.anv) {                                                                // the Analyze model: the chosen bay alone, zoomed to; or the whole frame
     A.anv.setSource(src, it.box || null);
@@ -148,7 +148,7 @@ function renderRatings(item) {
     const row = document.createElement('button'); row.type = 'button'; row.className = 'row' + (on ? ' on' : ''); row.dataset.word = word;
     row.setAttribute('aria-pressed', on ? 'true' : 'false');
     row.innerHTML = `<span class="ab">${String(i + 1).padStart(2, '0')}</span><span class="wd">${word}</span><span class="m"><span class="track"><span class="bar" style="width:${v ?? 0}%"></span></span><span class="num">${v == null ? '—' : v}</span></span>`;
-    row.onclick = () => { A.word = word; renderRatings(item); renderWhy(item); drawView(item); };
+    row.onclick = () => { A.word = word; renderRatings(item); renderWhy(item); };
     list.appendChild(row);
   });
 }
@@ -222,7 +222,6 @@ function hatchPattern(ctx, color, angle, spacing) {
   return ctx.createPattern(c, 'repeat');
 }
 let INK = '#111';                                                              // the overlay colour (red in the Program tab)
-function drawView(item) { if (A.depth) drawDiagram($('#view'), item.grid, item.result, A.word, '#111'); }
 function drawDiagram(cv, G, res, word, ink) {
   const R = { x0: 0, y0: 0, x1: G.cols * CELL, y1: G.rows * CELL };
   if (!cv.parentElement.clientWidth) return;                                   // hidden
@@ -452,7 +451,7 @@ function showTab(name) {
   $$('.topbar a[data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === name));
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
   window.scrollTo({ top: 0 });
-  if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'analyze') drawView(A.item); else if (name === 'program') renderProgram(); }
+  if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'program') renderProgram(); }
   window.dispatchEvent(new Event('resize'));
 }
 document.addEventListener('click', e => {
@@ -465,11 +464,8 @@ window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
 // ------------------------------------------------------------------ boot
 function boot() {
   $$('.picker').forEach(wirePicker);
-  try { A.depth = localStorage.getItem('protospace.depth') === '1'; } catch (e) {}
-  const dt = $('#depthToggle'); dt.checked = A.depth; $('#depthWrap').hidden = !A.depth;
-  dt.addEventListener('change', () => { A.depth = dt.checked; $('#depthWrap').hidden = !A.depth; try { localStorage.setItem('protospace.depth', A.depth ? '1' : '0'); } catch (e) {} if (A.item) drawView(A.item); });
-  window.addEventListener('resize', () => { if (A.item && A.tab === 'analyze') drawView(A.item); if (A.item && A.item.bays && A.tab === 'program' && A.progDepth) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
-  A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, view: 'iso', color: 'foam', ratio: 0.5, emptyText: 'Pick an animation and a frame above.', onReady: () => { A.anvWin = undefined; if (A.item) renderAll(); } });
+  window.addEventListener('resize', () => { if (A.item && A.item.bays && A.tab === 'program' && A.progDepth) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
+  A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, view: 'iso', color: 'foam', style: 'blocks', ratio: 0.5, emptyText: 'Pick an animation and a frame above.', onReady: () => { A.anvWin = undefined; if (A.item) renderAll(); } });
   A.pv = createViewer($('#progViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'iso', color: 'foam', ratio: 0.62, emptyText: 'Pick an animation and a frame above.' });
   const hs = $('#progHl'); hs.innerHTML = HIGHLIGHTS.map(([k, t]) => `<option value="${k}">${t}</option>`).join(''); hs.value = A.hl;
   hs.addEventListener('change', () => { A.hl = hs.value; if (A.item && A.item.bays && A.pv) { const b = A.item.bays[A.bay]; A.pv.setHighlight(highlightCells(A.item.vox, THR, b.box, A.hl, b.result), hlOpts()); } });
