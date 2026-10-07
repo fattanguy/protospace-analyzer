@@ -29,6 +29,8 @@ const CLASS_NAMES = ['', 'work (face mass)', 'gathering pocket', 'street', 'brid
 const CLASS_COLORS = { 0: 0xd6d1cc, 1: 0xd6d1cc, 2: 0x6b5bd2, 3: 0xe07b2a, 4: 0xf0b56b, 5: 0x7aa98f, 6: 0x8a8a8a, 7: 0xffffff };
 const LEVEL_COLORS = [0xdcdcdc, 0xb8b8b8, 0x969696];
 const CUT = 0xe07b2a, BOX_LINE = 0x222222, OUTLINE = 0x6b5bd2;
+/* The page is dark (the theme attribute, or the system setting when none is set): the scene follows it. */
+const isDark = () => { const t = document.documentElement.dataset.theme; return t === 'dark' || (t !== 'light' && !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)); };
 const ROUNDED_LIMIT = 6000;                                               // bevelled cubes for small models; plain boxes for the whole slab
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -154,7 +156,7 @@ export function createViewer(root, opts = {}) {
     M.renderer = renderer;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf3f1ee);
+    scene.background = new THREE.Color(isDark() ? 0x050505 : 0xf3f1ee);
     M.scene = scene;
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 4000);
     camera.position.set(-30, 30, 60);
@@ -192,6 +194,7 @@ export function createViewer(root, opts = {}) {
       M.gizmo = tc;
     }
 
+    if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (M.source) rebuild(); });
     new ResizeObserver(resize).observe(viewport);
     resize();
     new IntersectionObserver(entries => { M.visible = entries[0].isIntersecting; if (M.visible) loop(); }, { threshold: 0 }).observe(viewport);
@@ -450,11 +453,14 @@ export function createViewer(root, opts = {}) {
       }
       M.mesh.userData.style = s.style;
     }
-    M.scene.background = new THREE.Color(unlit ? 0xffffff : 0xf3f1ee);
+    const dk = isDark();
+    M.scene.background = new THREE.Color(unlit ? 0xffffff : dk ? 0x050505 : 0xf3f1ee);
+    M.hemi.groundColor.set(dk ? 0x3a3a3a : 0xb5aea6);
+    M.boxLines.material.color.set(dk ? 0xe8e8e8 : BOX_LINE); M.boxFill.material.color.set(dk ? 0xffffff : 0x3a3a3a);
     M.hemi.visible = M.light.visible = M.fill.visible = !unlit;
     const depth = v.nz;
     if (!unlit) {
-      const base = new THREE.Mesh(new THREE.BoxGeometry(v.nx + 6, 0.6, depth + 6), new THREE.MeshStandardMaterial({ color: 0xe6e1db, roughness: 1 }));
+      const base = new THREE.Mesh(new THREE.BoxGeometry(v.nx + 6, 0.6, depth + 6), new THREE.MeshStandardMaterial({ color: dk ? 0x1c1c1c : 0xe6e1db, roughness: 1 }));
       base.position.set(v.nx / 2, C.rBase - 0.3, -depth / 2 + 1); base.receiveShadow = s.shadows; M.scene.add(base); M.base = base;
     }
     M.bbox = new THREE.Box3(new THREE.Vector3(0, C.rBase, -depth), new THREE.Vector3(v.nx, v.ny, 0));
