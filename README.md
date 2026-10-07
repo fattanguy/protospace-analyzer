@@ -24,7 +24,9 @@ Live at the Vercel deployment of this repository.
   scene and Noise loop, or any animation you saved) and a frame. The frame is shown as a
   white solid model with shadows; pick one of its five bays (the model zooms to that bay
   alone) or the whole frame to rate. Each rating has a one-line
-  question, a score, what the frame shows, what was measured and how to raise it. The full
+  question, a score, what it looks for and what it counts (`js/guide.js`, written to match the
+  analyzer exactly), how it is scored term by term, what this frame shows, and what raises or
+  lowers it; the folded reference lists the reading rules and all twelve descriptors. The full
   rubric-v3 assessment (editable interpretation, combined score, JSON download) and the
   method notes are folded away underneath.
 - **Program** — the frame split into five bays (equal parts across the slab, the full height

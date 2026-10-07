@@ -14,6 +14,7 @@
 
 import { DEFAULTS, withDefaults, lastKeyFrame, valueAt } from './field.js';
 import { createViewer } from './viewer.js';
+import { GUIDE } from './guide.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -193,7 +194,7 @@ function renderRatings(result) {
   const el = $('#genRatings'); if (!el) return;
   const W = window.PSA.WORDS;
   if (!result || result.features.empty) { el.innerHTML = '<p class="hint">Too little mass to rate — lower “Grow from” in the modifiers.</p>'; return; }
-  el.innerHTML = W.map(w => { const v = result.ratings[w]; return `<div class="gen-row"><span class="wd">${w}</span><span class="track"><span class="bar" style="width:${v ?? 0}%"></span></span><span class="num">${v == null ? '—' : v}</span></div>`; }).join('');
+  el.innerHTML = W.map(w => { const v = result.ratings[w]; return `<div class="gen-row" title="${GUIDE[w] ? GUIDE[w].ask : ''}"><span class="wd">${w}</span><span class="track"><span class="bar" style="width:${v ?? 0}%"></span></span><span class="num">${v == null ? '—' : v}</span></div>`; }).join('');
 }
 
 // ------------------------------------------------------------------ playback

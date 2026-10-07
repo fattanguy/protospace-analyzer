@@ -557,7 +557,7 @@
         terms: [t("Work clusters", `${clusters.length}`, `${T.village_clusters} earns full marks`, a),
           t("Streets", `${streets.length}`, `${T.streets} earns full marks`, b),
           t("Gathering nodes", `${pockets.length}`, `${T.nodes} earns full marks`, c)],
-        text: `${clusters.length} work ${plural(clusters.length, "cluster")}, ${streets.length} ${plural(streets.length, "street")} and ${pockets.length} gathering ${plural(pockets.length, "node")} — the rating is the geometric mean of the three, so the weakest count holds it back.`,
+        text: `${clusters.length} work ${plural(clusters.length, "cluster")}, ${streets.length} ${plural(streets.length, "street")} and ${pockets.length} gathering ${plural(pockets.length, "node")} — each counted against its target (3, 3 and 5) and added with the weights shown.`,
         advice: weakest[1] < 0.6 ? `The weakest ingredient is the ${weakest[0]} — a village needs all three.` : "Reads as a community of territories, streets and shared places."
       };
     }

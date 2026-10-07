@@ -7,28 +7,13 @@
 import { PSGen } from './generator.js';
 import { createViewer } from './viewer.js';
 import { bayBoxes, measureBay, programScores, highlightCells, signature, pickDistinct, HIGHLIGHTS, PROGRAMS, PROGRAM_KEYS } from './program.js';
+import { GUIDE, READING } from './guide.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const WORDS = PSA.WORDS;
 const CELL = 12;                                                             // screen pixels per cube in the drawing
 const THR = PSGen.threshold(255);
-
-// what each descriptor asks, in plain words
-const SIMPLE = {
-  'Modular': 'Is it built from repeating pieces of the same size?',
-  'Fragmented': 'Does it break into separate chunks instead of one big block?',
-  'Interlocking': 'Do the pieces overlap and hook into each other?',
-  'Porous': 'Are there plenty of holes and openings to see and walk through?',
-  'Clustered': 'Do the pieces gather into little groups?',
-  'Decentralized': 'Are the shared spaces spread around, not just in one spot?',
-  'Networked': 'Are there many ways to get from one place to another?',
-  'Layered': 'Do different kinds of space stack on top of each other?',
-  'Intimate': 'Are there small, cosy places for a few people?',
-  'Visually Connected': 'Can people see each other from place to place?',
-  'Socially Interactive': 'Do paths pass by shared spaces where people can meet?',
-  'Village-Like': 'Does it feel like a small village: groups, streets and squares?',
-};
 
 // ------------------------------------------------------------------ cube lattice → the elevation the analyzer reads
 const TONE_OF_DEPTH = [[0, 0.02], [3, 0.09], [8.5, 0.20], [18, 0.40], [26, 0.70]];
@@ -155,19 +140,24 @@ function renderRatings(item) {
 function renderWhy(item) {
   const w = A.word, i = WORDS.indexOf(w), ex = item.result.explain[w], score = item.result.ratings[w];
   $('#whyTitle').textContent = `${String(i + 1).padStart(2, '0')}  ${w}`;
-  $('#whySimple').textContent = SIMPLE[w];
+  const g = GUIDE[w];
+  $('#whySimple').textContent = g.ask;
   $('#whyScore').textContent = score == null ? '—' : score;
   $('#whyLabel').textContent = PSARubric.label(score);
+  $('#whyLooks').textContent = g.looks;
+  $('#whyCounts').innerHTML = g.counts.map(c => `<li>${c}</li>`).join('');
+  $('#whyLimit').textContent = 'What it cannot tell: ' + g.cannot;
   $('#whyText').textContent = item.result.features.empty ? 'There is too little mass in this frame to rate it. Try another frame or raise the mass in the Generator.' : (ex.text || '');
   $('#whyAdvice').textContent = ex.advice || '';
   $('#whyAdvice').parentElement.hidden = !ex.advice;
+  $('#whyRaise').textContent = g.raise; $('#whyLower').textContent = g.lower;
   const terms = $('#whyTerms'); terms.innerHTML = '';
-  (ex.terms || []).forEach(t => {
+  (ex.terms || []).forEach((t, i) => {
     const li = document.createElement('li');
-    li.innerHTML = `<div class="tname">${t.name}</div><div class="tval">${t.value}</div><div class="tbar"><span style="width:${Math.round(100 * t.norm)}%"></span></div><div class="tnote">${t.note.split(' Normalization:')[0]} · counts for ${t.weight}% of the score</div>`;
+    li.innerHTML = `<div class="tname">${t.name}</div><div class="tval">${t.value}</div><div class="tbar"><span style="width:${Math.round(100 * t.norm)}%"></span></div><div class="tnote">${g.score[i] ? g.score[i].replace(/^[^·]+· /, 'Weight ') : (t.note.split(' Normalization:')[0] + ' · weight ' + t.weight + ' %')} → ${Math.round(100 * t.norm)} of 100 here, worth ${t.contribution.toFixed(1)} points.</div>`;
     terms.appendChild(li);
   });
-  $('#whyLimit').textContent = PSARubric.definitions[w].limit;
+  if (!ex.terms || !ex.terms.length) terms.innerHTML = g.score.map(l => `<li><div class="tnote">${l}</div></li>`).join('');
   renderReview(item);
 }
 
@@ -406,7 +396,7 @@ function renderProgram() {
   $('#progMeasures').innerHTML = [['Solid cubes', pct(m.solidShare)], ['Empty cubes', pct(m.voidShare)], ['Floor with headroom', m.floor + ' m²'], ['Sheltered floor', pct(m.coveredShare) + ' of it'], ['Roofed hall at the ground', m.hall + ' m²'], ['Open ground', pct(m.groundVoid)], ['See-through columns', pct(m.seeThrough)], ['Mass at the front', pct(m.frontMass)], ['Gathering pockets', m.pockets], ['Streets', m.streets], ['Openings', m.openings]].map(([k, v]) => `<div><span>${k}</span><span>${v}</span></div>`).join('');
   const top = PROGRAM_KEYS.reduce((m, k) => b.programs[k].score > b.programs[m].score ? k : m, 'lobby'), used = new Set(Object.keys(PROGRAMS[top].words));
   $('#progRatingsNote').textContent = `Red bars feed the ${PROGRAMS[top].name.toLowerCase()} score, this bay's strongest use.`;
-  $('#progRatings').innerHTML = WORDS.map(w => { const v = b.result.ratings[w]; return `<div class="gen-row"><span class="wd">${w}</span><span class="track"><span class="bar${used.has(w) ? ' used' : ''}" style="width:${v ?? 0}%"></span></span><span class="num">${v == null ? '—' : v}</span></div>`; }).join('');
+  $('#progRatings').innerHTML = WORDS.map(w => { const v = b.result.ratings[w]; return `<div class="gen-row" title="${GUIDE[w].ask}"><span class="wd">${w}</span><span class="track"><span class="bar${used.has(w) ? ' used' : ''}" style="width:${v ?? 0}%"></span></span><span class="num">${v == null ? '—' : v}</span></div>`; }).join('');
   renderProgWords(b);
   if (A.progDepth) drawDiagram($('#progView'), b.grid, b.result, A.progWord, '#c62828');
 }
@@ -462,7 +452,12 @@ document.addEventListener('click', e => {
 window.addEventListener('hashchange', () => showTab(location.hash.slice(1)));
 
 // ------------------------------------------------------------------ boot
+function renderGuide() {
+  $('#readingList').innerHTML = READING.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  $('#guideTable tbody').innerHTML = WORDS.map((w, i) => { const g = GUIDE[w]; return `<tr><td>${String(i + 1).padStart(2, '0')} ${w}</td><td><p style="margin:0 0 4px"><b>${g.ask}</b></p>${g.looks}</td><td><ul>${g.score.map(l => `<li>${l}</li>`).join('')}</ul></td></tr>`; }).join('');
+}
 function boot() {
+  renderGuide();
   $$('.picker').forEach(wirePicker);
   window.addEventListener('resize', () => { if (A.item && A.item.bays && A.tab === 'program' && A.progDepth) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
   A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, view: 'iso', color: 'foam', style: 'blocks', ratio: 0.5, emptyText: 'Pick an animation and a frame above.', onReady: () => { A.anvWin = undefined; if (A.item) renderAll(); } });

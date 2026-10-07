@@ -93,14 +93,22 @@
       </div>
       <div class="cards">
         <article class="card">
-          <h3>What the frame shows</h3>
-          <p class="lead" id="whyText"></p>
-          <p class="advice"><span id="whyAdvice"></span></p>
+          <h3>What it looks for</h3>
+          <p class="lead" id="whyLooks"></p>
+          <h4>In this model it counts</h4>
+          <ul class="plain" id="whyCounts"></ul>
+          <p class="hint" id="whyLimit"></p>
         </article>
         <article class="card">
-          <h3>What was measured</h3>
+          <h3>How it is scored · this frame</h3>
           <ul class="terms" id="whyTerms"></ul>
-          <p class="hint" id="whyLimit"></p>
+        </article>
+        <article class="card">
+          <h3>What this frame shows</h3>
+          <p class="lead" id="whyText"></p>
+          <p class="advice"><span id="whyAdvice"></span></p>
+          <p class="kv"><b>Raises it</b> · <span id="whyRaise"></span></p>
+          <p class="kv"><b>Lowers it</b> · <span id="whyLower"></span></p>
         </article>
       </div>
 
@@ -133,23 +141,13 @@
       </details>
 
       <details class="more">
-        <summary>How the frame is read</summary>
-        <div class="method">
-          <div>
-            <p>The frame is looked at from the front. Every metre of the face is classed by how deep its first cube sits: black at the front, grey a few metres back, light grey deep inside, white where you see straight through. Modules are 9 m wide and 3 m tall; the module grid is placed where the full/empty reading is clearest. 1 cube = 1 m.</p>
-            <p>Scores describe fit to this project's targets, not architectural quality. They are a tool for comparing frames, not a verdict.</p>
-          </div>
-          <div>
-            <ul class="legend">
-              <li><span class="sw" style="background:#111"></span>mass at the front</li>
-              <li><span class="sw" style="background:#565656"></span>first mass 3–8 m back</li>
-              <li><span class="sw" style="background:#929292"></span>recess 9–18 m deep</li>
-              <li><span class="sw" style="background:#c8c8c8"></span>recess 19 m or deeper</li>
-              <li><span class="sw"></span>see-through</li>
-              <li><span class="sw hatch"></span>gathering pocket (a recess of 12 m² or more)</li>
-              <li><span class="sw bar"></span>street (a floor-level recess 5 m or longer) · thinner = bridge</li>
-            </ul>
-          </div>
+        <summary>How the frame is read · the twelve descriptors</summary>
+        <div class="guide">
+          <h4>The reading, before any rating</h4>
+          <dl class="reading" id="readingList"></dl>
+          <h4>The twelve descriptors</h4>
+          <div style="overflow-x:auto"><table class="ag guide-table" id="guideTable"><thead><tr><th>Descriptor</th><th>What it looks for</th><th>How it is scored</th></tr></thead><tbody></tbody></table></div>
+          <p class="hint">Scores describe fit to this project's targets, not architectural quality. They are a tool for comparing frames and bays, not a verdict. 1 cube = 1 m; modules are 9 m wide and 3 m tall.</p>
         </div>
       </details>
     </section>
@@ -221,7 +219,7 @@
           <p>Each use is a 0–100 score: 60 % from the descriptors that matter for it, 40 % from the counts. <strong>Lobby</strong> wants Porous, Visually Connected, Networked, Socially Interactive and Layered, plus a roofed hall at the ground, open ground and an open (not stuffed) bay. <strong>Gathering</strong> wants Socially Interactive, Decentralized, Clustered, Village-Like, Intimate and Layered, plus sheltered floor, gathering pockets and floor with headroom. <strong>Working</strong> wants Modular, Intimate, Clustered, Layered and Interlocking, plus floor with headroom, enough mass to make rooms (30–60 % solid) and enclosure (few see-through columns).</p>
         </div>
         <div>
-          <p>The red in the model marks exactly what a reading counts — every cube of mass, all the empty space, the enclosed voids with mass on three or more sides, the floors, the sheltered floors, the roofed hall, the open ground, the see-through columns, or the pockets, streets and openings of the face — so you can check the count against what you see. The scores describe fit to these simple rules, not whether a design is good; use them to compare bays and frames.</p>
+          <p>Each of the twelve descriptors is explained in full in the Analyze tab (select a rating), with what it looks for and how it is scored. The red in the model marks exactly what a reading counts — every cube of mass, all the empty space, the enclosed voids with mass on three or more sides, the floors, the sheltered floors, the roofed hall, the open ground, the see-through columns, or the pockets, streets and openings of the face — so you can check the count against what you see. The scores describe fit to these simple rules, not whether a design is good; use them to compare bays and frames.</p>
         </div>
       </div>
     </details>

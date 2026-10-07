@@ -203,6 +203,21 @@
   .card { border-top: 1px solid var(--rule); padding-top: 14px; min-width: 0; }
   .card h3 { font-size: 12px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--ink3); margin: 0 0 8px; }
   .card p { margin: 0 0 10px; }
+  .card h4 { font-size: 11px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--ink3); margin: 12px 0 6px; }
+  .plain { margin: 0 0 10px; padding-left: 18px; font-size: 13.5px; color: var(--ink); display: grid; gap: 5px; }
+  .plain li::marker { color: var(--ink3); }
+  .kv { font-size: 13px; color: var(--ink2); }
+  .kv b { color: var(--ink); font-weight: 500; }
+  .guide h4 { font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--ink3); margin: 14px 0 8px; }
+  .reading { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 18px; margin: 0; font-size: 13px; color: var(--ink2); }
+  .reading dt { font-weight: 500; color: var(--ink); }
+  .reading dd { margin: 0; }
+  .guide-table th, .guide-table td { vertical-align: top; font-size: 12.5px; }
+  .guide-table td:first-child { font-weight: 500; white-space: nowrap; }
+  .guide-table td:not(:first-child) { text-align: left; font-variant-numeric: normal; }
+  .guide-table td:last-child { text-align: left; font-weight: 400; }
+  .guide-table ul { margin: 0; padding-left: 16px; }
+  @media (max-width: 640px) { .reading { grid-template-columns: 1fr; gap: 2px 0; } .reading dd { margin-bottom: 8px; } }
   .card .lead { font-size: 15px; }
   .card .advice { color: var(--ink2); }
   .card .advice::before { content: "To raise it · "; color: var(--ink3); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
