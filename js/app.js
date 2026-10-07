@@ -467,7 +467,7 @@ function boot() {
   const pd = $('#progDepth'); pd.addEventListener('change', () => { A.progDepth = pd.checked; $('#progDepthWrap').hidden = !A.progDepth; if (A.progDepth && A.item && A.item.bays) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
   $('#progScanGo').addEventListener('click', scanAnimation);
   $('#progScanStop').addEventListener('click', () => { if (A.scan) A.scan.stop = true; });
-  A.model = createViewer($('#model3dViewer'), { panel: 'side', sections: ['look', 'crop', 'cut', 'export'], open: { look: true, crop: true, cut: false, export: false }, emptyText: 'Pick an animation and a frame above to see its 3D model.', onBox: rateBox });
+  A.model = createViewer($('#model3dViewer'), { panel: 'side', sections: ['look', 'crop', 'cut', 'export'], open: { look: true, crop: true, cut: false, export: false }, color: 'foam', emptyText: 'Pick an animation and a frame above to see its 3D model.', onBox: rateBox });
   PSGen.mount({
     analyze: (vox, thr) => analyzeVox(vox, thr),
     onAnalyzeFrame: (settings, frame) => { A.animId = 'current'; A.frame = frame; fillPickers(); A.dirty = true; showTab('analyze'); },

@@ -30,9 +30,28 @@ const SCENE = {                                         // read from Voxel Anima
   voronoi: { metric: 'chebychev', randomness: 1, w: 0, detail: 0 },
   keys: [{ path: 'offset.2', ease: 'bezier', keys: [[0, 0], [300, 50]] }],      // Offset Z keyframed 0 → 50 over frames 0–300
 };
+/* Built-in animations: the Blender scene, the original loop, and seven studies tuned for interior space
+   (checked in Node against the bay measures: floors with headroom, sheltered floors, halls, pockets, streets, porosity). */
+const STUDIES = {
+  terraces: { pattern: 'noise', scale: 0.33, noise: { detail: 2, roughness: 0.45, lacunarity: 2, distortion: 1.2 }, growFrom: 0.48, fullSizeAt: 0.51, animate: true, travel: [6, 0, 14] },
+  strata: { pattern: 'noise', scale: 0.35, noise: { detail: 2, roughness: 0.5, lacunarity: 2, distortion: 1.5 }, growFrom: 0.49, fullSizeAt: 0.52, animate: true, travel: [0, 0, 20] },
+  rooms: { pattern: 'noise', scale: 0.42, noise: { detail: 2.5, roughness: 0.5, lacunarity: 2, distortion: 0.8 }, growFrom: 0.5, fullSizeAt: 0.5, sizeSteps: 1, animate: true, travel: [0, 12, 0] },
+  village: { pattern: 'voronoi', scale: 0.28, voronoi: { metric: 'chebychev', randomness: 0.6, w: 0, detail: 0 }, growFrom: 0.44, fullSizeAt: 0.48, animate: true, travel: [0, 5, 2] },
+  caves: { pattern: 'voronoi', scale: 0.35, voronoi: { metric: 'euclidean', randomness: 1, w: 0, detail: 0 }, growFrom: 0.62, fullSizeAt: 0.66, animate: true, travel: [0, 4, 3] },
+  blocks: { pattern: 'voronoi', scale: 0.45, voronoi: { metric: 'chebychev', randomness: 0.6, w: 0, detail: 0 }, growFrom: 0.42, fullSizeAt: 0.46, invert: true, animate: true, travel: [0, 6, 0] },
+  fillup: { pattern: 'noise', scale: 0.38, noise: { detail: 2, roughness: 0.5, lacunarity: 2, distortion: 0.6 }, growFrom: 0.55, fullSizeAt: 0.58, animate: true, travel: [0, 6, 0],
+    keys: [{ path: 'growFrom', ease: 'linear', keys: [[1, 0.58], [250, 0.42]] }, { path: 'fullSizeAt', ease: 'linear', keys: [[1, 0.61], [250, 0.45]] }] },
+};
 const BUILTIN = [
-  { id: 'scene', name: 'Blender scene · Voronoi', settings: withDefaults(SCENE), builtin: true },
+  { id: 'scene', name: 'Blender scene · Voronoi walls', settings: withDefaults(SCENE), builtin: true },
   { id: 'original', name: 'Original loop · Noise', settings: withDefaults({}), builtin: true },
+  { id: 'terraces', name: 'Terraces · stepped noise, sheltered floors with views across', settings: withDefaults(STUDIES.terraces), builtin: true },
+  { id: 'strata', name: 'Strata · layered floors with openings through', settings: withDefaults(STUDIES.strata), builtin: true },
+  { id: 'rooms', name: 'Rooms · crisp on/off cubes, halls at the ground', settings: withDefaults(STUDIES.rooms), builtin: true },
+  { id: 'village', name: 'Village · big Voronoi cells, rooms with streets between', settings: withDefaults(STUDIES.village), builtin: true },
+  { id: 'caves', name: 'Caves · rounded Voronoi, open halls carved from the mass', settings: withDefaults(STUDIES.caves), builtin: true },
+  { id: 'blocks', name: 'Blocks · inverted Voronoi, stacked blocks with corridors', settings: withDefaults(STUDIES.blocks), builtin: true },
+  { id: 'fillup', name: 'Filling up · density keyframed, sparse at the start, dense by the end', settings: withDefaults(STUDIES.fillup), builtin: true },
 ];
 
 // ------------------------------------------------------------------ the saved-animation store (localStorage)
@@ -400,7 +419,7 @@ export function mount(hooks) {
   loadSettings();
   // the viewer, with its Look section rendered later into the dropdown
   const pre = document.createElement('div');                                 // temporary host for the sections until the dropdown exists
-  G.viewer = createViewer(root, { panel: 'none', overlay: true, sections: ['look'], panelEl: pre, emptyText: 'Generating the first frame…', ratio: 0.56 });
+  G.viewer = createViewer(root, { panel: 'none', overlay: true, sections: ['look'], panelEl: pre, emptyText: 'Generating the first frame…', ratio: 0.56, color: 'foam' });
   const viewport = G.viewer.V('viewport');
   viewport.insertAdjacentHTML('beforeend', OVERLAYS);
   buildControls($('#genMods'));
