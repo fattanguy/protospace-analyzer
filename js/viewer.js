@@ -10,6 +10,7 @@
      panelEl   an element to render the settings sections into (used by the Generator's dropdown)
      sections  which settings sections to show: ['look', 'crop', 'cut', 'export']
      overlay   true → the view buttons float inside the viewport
+     showBox   false hides the box's own outline (the crop still applies)
      onBox     fn(box | null) — the crop box changed ({ x0, x1, y0, y1, z0, z1 } in lattice cells, or null when off)
      onReady   fn(api) */
 
@@ -276,7 +277,7 @@ export function createViewer(root, opts = {}) {
     V('cropOn').checked = b.on; V('cropFields').hidden = !b.on;
   }
   function drawBox() {
-    const b = M.box, v = M.source && M.source.vox, on = b.on && !!v;
+    const b = M.box, v = M.source && M.source.vox, on = b.on && !!v && opts.showBox !== false;
     M.boxLines.visible = M.boxFill.visible = on;
     if (M.gizmo) { const lift = on && b.y1 - b.y0 < v.ny; M.gizmo.enabled = lift; M.gizmo.getHelper().visible = lift; }
     if (!on) return;
@@ -695,7 +696,8 @@ export function createViewer(root, opts = {}) {
     put('style', 'style'); put('sizes', 'sizes'); put('color', 'color'); put('shadows', 'shadows');
   }
 
-  Object.assign(api, { setSource, setBox, setHighlight, zoomToBox, view, rebuild, snapshot, exportOBJ, exportSTL, exportGLB, recordTurn, resize, get ready() { return M.ready; }, get box() { return M.box.on ? Object.assign({}, M.box) : null; }, settings: M.settings, el: root, V });
+  Object.assign(api, { setSource, setBox, setHighlight, zoomToBox, view, rebuild, snapshot, exportOBJ, exportSTL, exportGLB, recordTurn, resize, settings: M.settings, el: root, V });
+  Object.defineProperties(api, { ready: { get: () => M.ready }, box: { get: () => (M.box.on ? Object.assign({}, M.box) : null) } });   // live getters (Object.assign would copy their values)
   init();
   return api;
 }

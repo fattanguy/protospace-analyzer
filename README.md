@@ -20,8 +20,8 @@ Live at the Vercel deployment of this repository.
   video, and the Blender settings file. The twelve ratings of the frame on screen update
   live.
 - **Analyze** — pick an animation (what is on screen in the Generator, the built-in Blender
-  scene and Noise loop, or any animation you saved) and a frame. The actual frame is shown
-  through the render camera in the studio-render look; pick one of its five bays
+  scene and Noise loop, or any animation you saved) and a frame. The frame is shown as a
+  white model with shadows; pick one of its five bays (the model zooms to that bay alone)
   or the whole frame to rate, and tick *Depth diagram* to see the flat reading behind the
   ratings with what the selected rating looks at drawn on it. Each rating has a one-line
   question, a score, what the frame shows, what was measured and how to raise it. The full

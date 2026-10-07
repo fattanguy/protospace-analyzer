@@ -128,7 +128,10 @@ function renderAll() {
   setStatus(`${base} · rating ${winLabel(it.vox, A.win)}`, base);
   renderRatings(it); renderWhy(it); drawView(it);
   const src = { name: it.name, frame: it.frame, vox: it.vox, camera: it.camera, result: it.result };
-  if (A.anv) A.anv.setSource(src, it.box ? Object.assign({ outline: true }, it.box) : null);
+  if (A.anv) {                                                                // the Analyze model: the chosen bay alone, zoomed to; or the whole frame
+    A.anv.setSource(src, it.box || null);
+    if (A.anv.ready && A.anvWin !== A.win) { if (it.box) A.anv.zoomToBox(); else A.anv.view('iso'); A.anvWin = A.win; }
+  }
   if (A.model) { A.model.setSource(src); rateBox(A.model.box); }
   it.bays = null; if (A.tab === 'program') renderProgram();
 }
@@ -466,7 +469,7 @@ function boot() {
   const dt = $('#depthToggle'); dt.checked = A.depth; $('#depthWrap').hidden = !A.depth;
   dt.addEventListener('change', () => { A.depth = dt.checked; $('#depthWrap').hidden = !A.depth; try { localStorage.setItem('protospace.depth', A.depth ? '1' : '0'); } catch (e) {} if (A.item) drawView(A.item); });
   window.addEventListener('resize', () => { if (A.item && A.tab === 'analyze') drawView(A.item); if (A.item && A.item.bays && A.tab === 'program' && A.progDepth) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
-  A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'camera', color: 'render', ratio: 0.5, emptyText: 'Pick an animation and a frame above.' });
+  A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, view: 'iso', color: 'foam', ratio: 0.5, emptyText: 'Pick an animation and a frame above.', onReady: () => { A.anvWin = undefined; if (A.item) renderAll(); } });
   A.pv = createViewer($('#progViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'iso', color: 'foam', ratio: 0.62, emptyText: 'Pick an animation and a frame above.' });
   const hs = $('#progHl'); hs.innerHTML = HIGHLIGHTS.map(([k, t]) => `<option value="${k}">${t}</option>`).join(''); hs.value = A.hl;
   hs.addEventListener('change', () => { A.hl = hs.value; if (A.item && A.item.bays && A.pv) { const b = A.item.bays[A.bay]; A.pv.setHighlight(highlightCells(A.item.vox, THR, b.box, A.hl, b.result), hlOpts()); } });
