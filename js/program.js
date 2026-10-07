@@ -146,3 +146,30 @@ export const HIGHLIGHTS = [
   ['covered', 'Sheltered floors · floors with mass overhead'], ['hall', 'Roofed hall · ground with headroom and mass overhead'], ['ground', 'Open ground · the empty bottom 3 m'], ['seeThrough', 'See-through · columns with no mass at all'],
   ['pockets', 'Gathering pockets · recesses of 12 m² or more'], ['streets', 'Streets · floor-level recesses 5 m or longer'], ['openings', 'Openings · holes through the face'],
 ];
+
+/* A coarse fingerprint of a bay's geometry: how full each 3 × 3 × 3 m block is. Two bays whose fingerprints differ
+   by less than `SAME` on average are the same space (a neighbouring frame, or a slow drift of the pattern). */
+export const SAME = 0.2, MIN_GAP = 15;
+export function signature(vox, thr, b) {
+  const { nx, ny, nz, sizes } = vox, B = 3;
+  const bx = Math.ceil((b.x1 - b.x0) / B), by = Math.ceil(ny / B), bz = Math.ceil(nz / B);
+  const sum = new Float32Array(bx * by * bz), cnt = new Float32Array(bx * by * bz);
+  for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = b.x0; x < b.x1; x++) {
+    const i = Math.floor((x - b.x0) / B) + bx * (Math.floor(y / B) + by * Math.floor(z / B));
+    cnt[i]++; if (sizes[x + nx * (y + ny * z)] >= thr) sum[i]++;
+  }
+  for (let i = 0; i < sum.length; i++) sum[i] /= cnt[i] || 1;
+  return sum;
+}
+export function difference(a, b) { let d = 0; const n = Math.min(a.length, b.length); for (let i = 0; i < n; i++) d += Math.abs(a[i] - b[i]); return n ? d / n : 1; }
+/* The best `n` results that are really different spaces: walk the list best-first and skip anything that looks
+   like a space already kept (same bay within MIN_GAP frames, or a fingerprint closer than SAME). */
+export function pickDistinct(sorted, n, same = SAME, gap = MIN_GAP) {
+  const kept = [];
+  for (const r of sorted) {
+    if (kept.length >= n) break;
+    const dup = kept.some(k => (k.bay === r.bay && Math.abs(k.frame - r.frame) < gap) || (r.sig && k.sig && difference(r.sig, k.sig) < same));
+    if (!dup) kept.push(r);
+  }
+  return kept;
+}

@@ -6,7 +6,7 @@
 
 import { PSGen } from './generator.js';
 import { createViewer } from './viewer.js';
-import { bayBoxes, measureBay, programScores, highlightCells, HIGHLIGHTS, PROGRAMS, PROGRAM_KEYS, MEASURE_NAMES } from './program.js';
+import { bayBoxes, measureBay, programScores, highlightCells, signature, pickDistinct, HIGHLIGHTS, PROGRAMS, PROGRAM_KEYS } from './program.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -428,15 +428,15 @@ async function scanAnimation() {
       const sizes = await PSGen.generate(S, f); if (!sizes) continue;
       const vox = { nx, ny, nz, sizes, max: 255, threshold: THR };
       for (const b of bayBoxes(vox)) {
-        const { result } = analyzeVox(vox, THR, b), measures = measureBay(vox, THR, b, result), p = programScores(result.ratings, measures, result.features.empty);
-        for (const k of PROGRAM_KEYS) { out[k].push({ frame: f, bay: b.i, score: p[k].score }); }
+        const { result } = analyzeVox(vox, THR, b), measures = measureBay(vox, THR, b, result), p = programScores(result.ratings, measures, result.features.empty), sig = signature(vox, THR, b);
+        for (const k of PROGRAM_KEYS) { out[k].push({ frame: f, bay: b.i, score: p[k].score, sig }); }
       }
       await new Promise(r => setTimeout(r, 0));
     }
     for (const k of PROGRAM_KEYS) out[k].sort((a, c) => c.score - a.score || a.frame - c.frame);
-    $('#progResults').innerHTML = PROGRAM_KEYS.map(k => `<table><thead><tr><th colspan="3">Best for ${PROGRAMS[k].name.toLowerCase()}</th></tr></thead><tbody>${out[k].slice(0, 6).map(r => `<tr><td><button type="button" data-frame="${r.frame}" data-bay="${r.bay}">frame ${r.frame}</button></td><td>bay ${r.bay + 1}</td><td>${r.score}</td></tr>`).join('')}</tbody></table>`).join('');
+    $('#progResults').innerHTML = PROGRAM_KEYS.map(k => `<table><thead><tr><th colspan="3">Best for ${PROGRAMS[k].name.toLowerCase()} · six different spaces</th></tr></thead><tbody>${pickDistinct(out[k], 6).map(r => `<tr><td><button type="button" data-frame="${r.frame}" data-bay="${r.bay}">frame ${r.frame}</button></td><td>bay ${r.bay + 1}</td><td>${r.score}</td></tr>`).join('')}</tbody></table>`).join('');
     $$('#progResults button').forEach(bt => bt.onclick = () => { A.frame = +bt.dataset.frame; A.bay = +bt.dataset.bay; fillPickers(); loadFrame(); });
-    $('#progScanStatus').textContent = A.scan.stop ? 'Stopped — the results so far are below. Click a frame to open it.' : `Scanned ${Math.floor((max - 1) / step) + 1} frames of ${animName(A.animId)}. Click a frame to open it.`;
+    $('#progScanStatus').textContent = (A.scan.stop ? 'Stopped — the results so far are below.' : `Scanned ${Math.floor((max - 1) / step) + 1} frames of ${animName(A.animId)}.`) + ' Each list keeps only spaces that really differ (frames of the same bay at least 15 apart, and shapes that are not near-copies). Click a frame to open it.';
   } finally { A.scan = null; $('#progScanGo').disabled = false; $('#progScanStop').hidden = true; }
 }
 
