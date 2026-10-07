@@ -3,13 +3,13 @@
    a grid of points 0.14 apart fills the slab; a pattern (Noise, Voronoi, Wave or Pure Tone) is read at each
    point, slid through the slab over one loop (two evaluations cross-faded so the loop is seamless), mapped
    through the growth ramp (grow from → full size at), optionally inverted and stepped, and turned into the
-   size of the cube on that point. Pure ES module, no DOM: it runs in a Web Worker and in Node. */
+   size of the cube on that point. Any numeric parameter can be keyframed (keys). Pure ES module, no DOM: it runs in a Web Worker and in Node. */
 
 export const DEFAULTS = {
   pattern: 'noise',                       // noise | voronoi | wave | tone
   scale: 0.49, offset: [0, 0, 0], invert: false,
   animate: true, loopLength: 250, travel: [0, 0, 25], frameOffset: 0,
-  keyed: { enabled: false, axis: 2, f0: 0, v0: 0, f1: 300, v1: 50, ease: 'bezier' },   // a keyframed Offset component, as in the .blend
+  keys: [],                                // keyframe tracks: { path: 'offset.2', ease: 'bezier' | 'linear', keys: [[frame, value], ...] }
   growFrom: 0.52, fullSizeAt: 0.54, smallest: 0, largest: 1, sizeSteps: 0,
   cubeSize: 0.13, bevel: 0.01,
   spacing: 0.14, dims: [123, 19, 31],      // across, up, deep (points) — the exported Blender slab
@@ -163,22 +163,39 @@ export function patternValue(S, x, y, z) {
 }
 const mapRange = (v, a, b) => { if (b === a) return v >= b ? 1 : 0; const t = (v - a) / (b - a); return t < 0 ? 0 : t > 1 ? 1 : t; };
 
-/* A keyframed Offset component (two keys with flat Bezier handles, i.e. an ease in and out) at a frame. */
-export function keyedValue(K, frame) {
-  if (!K || !K.enabled) return null;
-  const f0 = Math.min(K.f0, K.f1), f1 = Math.max(K.f0, K.f1), v0 = K.f0 <= K.f1 ? K.v0 : K.v1, v1 = K.f0 <= K.f1 ? K.v1 : K.v0;
+/* A keyframe track at a frame: hold before the first key and after the last, ease between neighbours
+   (Bezier = Blender's default auto-clamped handles, an ease in and out; or linear). */
+export function trackValue(track, frame) {
+  const K = track.keys; if (!K || !K.length) return null;
+  const keys = K.slice().sort((a, b) => a[0] - b[0]);
+  if (frame <= keys[0][0]) return keys[0][1];
+  if (frame >= keys[keys.length - 1][0]) return keys[keys.length - 1][1];
+  let i = 0; while (i < keys.length - 1 && keys[i + 1][0] <= frame) i++;
+  const [f0, v0] = keys[i], [f1, v1] = keys[i + 1];
   if (f1 === f0) return v1;
-  let u = (frame - f0) / (f1 - f0); u = u < 0 ? 0 : u > 1 ? 1 : u;
-  if (K.ease === 'bezier') u = u * u * (3 - 2 * u);
+  let u = (frame - f0) / (f1 - f0);
+  if (track.ease !== 'linear') u = u * u * (3 - 2 * u);
   return v0 + (v1 - v0) * u;
 }
-/* The settings as they stand at one frame: the keyframed Offset component applied. */
+const getPath = (o, path) => path.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
+/* The settings as they stand at one frame: every keyframed parameter at its value for that frame. */
 export function settingsAt(S, frame) {
-  const v = keyedValue(S.keyed, frame);
-  if (v == null) return S;
-  const offset = S.offset.slice(); offset[S.keyed.axis] = v;
-  return Object.assign({}, S, { offset });
+  const tracks = S.keys; if (!tracks || !tracks.length) return S;
+  const out = Object.assign({}, S);
+  for (const tr of tracks) {
+    const v = trackValue(tr, frame); if (v == null || !tr.path) continue;
+    const ks = tr.path.split('.');
+    if (ks.length === 1) { out[ks[0]] = v; continue; }
+    const head = ks[0]; const copy = Array.isArray(out[head]) ? out[head].slice() : Object.assign({}, out[head]);
+    if (ks.length === 2) copy[ks[1]] = v; else { let o = copy; for (let i = 1; i < ks.length - 1; i++) { o[ks[i]] = Array.isArray(o[ks[i]]) ? o[ks[i]].slice() : Object.assign({}, o[ks[i]]); o = o[ks[i]]; } o[ks[ks.length - 1]] = v; }
+    out[head] = copy;
+  }
+  return out;
 }
+/* The last frame any track reaches (0 when nothing is keyed). */
+export function lastKeyFrame(S) { let m = 0; for (const tr of S.keys || []) for (const k of tr.keys || []) if (k[0] > m) m = k[0]; return m; }
+/* The value of a parameter at a frame, keyed or not. */
+export function valueAt(S, path, frame) { return getPath(settingsAt(S, frame), path); }
 
 /* The time of a frame: t runs 0 → 1 over one loop. */
 export function loopTime(S, frame) {
@@ -241,9 +258,13 @@ export function withDefaults(partial) {
   const S = JSON.parse(JSON.stringify(DEFAULTS));
   if (!partial) return S;
   for (const k of Object.keys(partial)) {
+    if (k === 'keyed') continue;                                              // the old single keyed Offset axis: migrated below
     if (partial[k] && typeof partial[k] === 'object' && !Array.isArray(partial[k])) S[k] = Object.assign({}, S[k], partial[k]);
-    else if (partial[k] !== undefined) S[k] = Array.isArray(partial[k]) ? partial[k].slice() : partial[k];
+    else if (partial[k] !== undefined) S[k] = Array.isArray(partial[k]) ? JSON.parse(JSON.stringify(partial[k])) : partial[k];
   }
+  const K = partial.keyed;
+  if (K && K.enabled && !(partial.keys && partial.keys.length)) S.keys = [{ path: 'offset.' + (K.axis ?? 2), ease: K.ease === 'linear' ? 'linear' : 'bezier', keys: [[K.f0 ?? 0, K.v0 ?? 0], [K.f1 ?? 300, K.v1 ?? 50]] }];
+  S.keys = (S.keys || []).filter(t => t && t.path && Array.isArray(t.keys)).map(t => ({ path: t.path, ease: t.ease === 'linear' ? 'linear' : 'bezier', keys: t.keys.filter(k => Array.isArray(k) && isFinite(+k[0]) && isFinite(+k[1])).map(k => [+k[0], +k[1]]) }));
   return S;
 }
 

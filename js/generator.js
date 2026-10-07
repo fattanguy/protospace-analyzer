@@ -12,7 +12,7 @@
      animations                   the saved-animation store: list(), get(id), save(name, settings), remove(id)
      onChange(fn)                 fn() whenever the generator settings or the store change */
 
-import { DEFAULTS, withDefaults } from './field.js';
+import { DEFAULTS, withDefaults, lastKeyFrame, valueAt } from './field.js';
 import { createViewer } from './viewer.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -27,7 +27,7 @@ const SCENE = {                                         // read from Voxel Anima
   growFrom: 0.52, fullSizeAt: 0.54, smallest: 0, largest: 1, sizeSteps: 0,
   noise: { detail: 2, roughness: 0.5, lacunarity: 2, distortion: 0 },
   voronoi: { metric: 'chebychev', randomness: 1, w: 0, detail: 0 },
-  keyed: { enabled: true, axis: 2, f0: 0, v0: 0, f1: 300, v1: 50, ease: 'bezier' },
+  keys: [{ path: 'offset.2', ease: 'bezier', keys: [[0, 0], [300, 50]] }],      // Offset Z keyframed 0 → 50 over frames 0–300
 };
 const BUILTIN = [
   { id: 'scene', name: 'Blender scene · Voronoi', settings: withDefaults(SCENE), builtin: true },
@@ -53,6 +53,16 @@ export const animations = {
 };
 
 // ------------------------------------------------------------------ worker pools (latest request wins)
+/* The parameters that can be keyframed (any number the field reads), with their names and the Blender input behind each. */
+const KEYABLE = [
+  ['scale', 'Scale', 'Pattern', 'Scale', -1], ['offset.0', 'Offset X · depth', 'Pattern', 'Offset', 0], ['offset.1', 'Offset Y · along the slab', 'Pattern', 'Offset', 1], ['offset.2', 'Offset Z · up', 'Pattern', 'Offset', 2],
+  ['growFrom', 'Grow from', 'Growth', 'Grow From', -1], ['fullSizeAt', 'Full size at', 'Growth', 'Full Size At', -1], ['smallest', 'Smallest cube', 'Growth', 'Smallest Cube', -1], ['largest', 'Largest cube', 'Growth', 'Largest Cube', -1], ['sizeSteps', 'Size steps', 'Growth', 'Size Steps', -1],
+  ['travel.0', 'Travel X · depth', 'Motion', 'Travel', 0], ['travel.1', 'Travel Y · along the slab', 'Motion', 'Travel', 1], ['travel.2', 'Travel Z · up', 'Motion', 'Travel', 2],
+  ['noise.detail', 'Noise detail', 'Noise', 'Detail', -1], ['noise.roughness', 'Noise roughness', 'Noise', 'Roughness', -1], ['noise.lacunarity', 'Noise lacunarity', 'Noise', 'Lacunarity', -1], ['noise.distortion', 'Noise distortion', 'Noise', 'Distortion', -1],
+  ['voronoi.randomness', 'Voronoi randomness', 'Voronoi', 'Randomness', -1], ['voronoi.w', 'Voronoi W', 'Voronoi', 'W', -1], ['voronoi.detail', 'Voronoi detail', 'Voronoi', 'Detail', -1],
+];
+const keyLabel = path => (KEYABLE.find(k => k[0] === path) || [path, path])[1];
+
 const MAX_POINTS = 450000;
 function makePool(n) {
   const workers = []; let reqId = 0, busy = false, pending = null, parts = null, inflight = null;
@@ -111,7 +121,7 @@ export function cameraFor(S) {
   const one = (P, i, dim, sign) => { const v = (P[i] - o[i]) / sp + 0.5; return sign > 0 ? v : dim - v; };
   return { name: 'Camera', position: [15.5, 0, 0], forward: [-1, 0, 0], lens_mm: 50, sensor_mm: 36, sensor_fit: 'AUTO', resolution: [1920, 1080], lattice: P => [one(P, 1, nx, 1), one(P, 2, ny, 1), one(P, 0, nz, -1)] };
 }
-export function frameMaxOf(S) { return Math.max(1, S.loopLength, S.keyed && S.keyed.enabled ? Math.max(S.keyed.f0, S.keyed.f1) : 0); }
+export function frameMaxOf(S) { return Math.max(1, S.loopLength, lastKeyFrame(S)); }
 export const threshold = (max = 255) => Math.round(THRESHOLD_FRAC * max);
 
 // ------------------------------------------------------------------ the controls, one entry per modifier input
@@ -127,13 +137,6 @@ const SCHEMA = [
     { k: 'loopLength', label: 'Loop length · frames', type: 'number', min: 1, max: 5000, step: 1 },
     { k: 'travel', label: 'Travel per loop · X depth, Y along, Z up', type: 'vec3', step: 0.5 },
     { k: 'frameOffset', label: 'Frame offset', type: 'number', min: -5000, max: 5000, step: 1 },
-    { k: 'keyed.enabled', label: 'Keyframed offset · one axis driven by two keyframes, as in the .blend', type: 'check' },
-    { k: 'keyed.axis', label: 'Keyframed axis', type: 'select', options: [['0', 'X · depth'], ['1', 'Y · along the slab'], ['2', 'Z · up']] },
-    { k: 'keyed.f0', label: 'From frame', type: 'number', min: -5000, max: 5000, step: 1 },
-    { k: 'keyed.v0', label: 'From value', type: 'number', min: -1000, max: 1000, step: 0.1 },
-    { k: 'keyed.f1', label: 'To frame', type: 'number', min: -5000, max: 5000, step: 1 },
-    { k: 'keyed.v1', label: 'To value', type: 'number', min: -1000, max: 1000, step: 0.1 },
-    { k: 'keyed.ease', label: 'Easing', type: 'select', options: [['bezier', 'Bezier · ease in and out (Blender default)'], ['linear', 'Linear']] },
   ] },
   { name: 'Growth', open: false, fields: [
     { k: 'growFrom', label: 'Grow from · pattern value where cubes appear', type: 'range', min: 0, max: 1, step: 0.005 },
@@ -207,6 +210,7 @@ function setFrame(f, fromSlider = false) {
   G.frame = clamp(Math.round(f), 1, frameMaxOf(G.S));
   if (!fromSlider) $('#genFrame').value = G.frame;
   $('#genFrameNumber').value = G.frame;
+  document.querySelectorAll('#genTracks [data-addkey]').forEach(b => { b.textContent = `+ Key at frame ${G.frame}`; });
   request(G.frame);
 }
 function setFrameRange() { $('#genFrame').max = frameMaxOf(G.S); $('#genFrameNumber').max = frameMaxOf(G.S); }
@@ -223,6 +227,10 @@ function buildControls(root) {
     for (const f of grp.fields) d.appendChild(fieldEl(f));
     root.appendChild(d);
   }
+  const keys = document.createElement('details'); keys.id = 'genKeys'; keys.open = (G.S.keys || []).length > 0;
+  keys.innerHTML = `<summary>Keyframes</summary><div id="genTracks"></div><label class="gen-field"><span>Keyframe a parameter</span><select id="genKeyAdd"><option value="">Choose a parameter…</option>${KEYABLE.map(([p, l]) => `<option value="${p}">${l}</option>`).join('')}</select></label><p class="hint">A keyframed parameter follows its keys: it holds before the first key, eases between keys and holds after the last. Add a key at the frame you are on, then type its value. The frame range grows to the last key.</p>`;
+  root.appendChild(keys);
+  $('#genKeyAdd').addEventListener('change', e => { const path = e.target.value; e.target.value = ''; if (!path) return; if (!G.S.keys.some(t => t.path === path)) { G.S.keys.push({ path, ease: 'bezier', keys: [[G.frame, +valueAt(G.S, path, G.frame) || 0]] }); } settingsChanged(); });
   const look = document.createElement('div'); look.id = 'genLook'; root.appendChild(look);      // the viewer's Look section goes here
   const foot = document.createElement('div'); foot.className = 'gen-foot';
   foot.innerHTML = `<button type="button" class="btn quiet" id="genReset">Reset to the Blender scene</button>`;
@@ -251,14 +259,13 @@ function fieldEl(f) {
     const path = inp.dataset.k;
     const apply = () => {
       let val = inp.type === 'checkbox' ? inp.checked : inp.tagName === 'SELECT' ? inp.value : +inp.value;
-      if (path === 'keyed.axis') val = +val;
       if (typeof val === 'number' && !isFinite(val)) return;
       if (inp.type === 'number' && inp.min !== '') val = clamp(val, +inp.min, +inp.max);
       if (path.startsWith('dims.')) val = Math.round(val);
       set(G.S, path, val);
       const out = inp.parentElement.querySelector('output'); if (out) out.textContent = fmtVal(val);
       if (path === 'pattern') refreshControls();
-      if (path === 'loopLength' || path.startsWith('keyed.')) { setFrameRange(); G.frame = clamp(G.frame, 1, frameMaxOf(G.S)); $('#genFrame').value = G.frame; $('#genFrameNumber').value = G.frame; }
+      if (path === 'loopLength') { setFrameRange(); G.frame = clamp(G.frame, 1, frameMaxOf(G.S)); $('#genFrame').value = G.frame; $('#genFrameNumber').value = G.frame; }
       fillPresets(); saveSettings(); request(G.frame); notify();
     };
     inp.addEventListener('input', apply);
@@ -267,12 +274,44 @@ function fieldEl(f) {
   return lab;
 }
 function refreshControls() {
+  const keyed = new Set((G.S.keys || []).map(t => t.path));
   document.querySelectorAll('#genMods [data-k]').forEach(inp => {
     const v = get(G.S, inp.dataset.k);
     if (inp.type === 'checkbox') inp.checked = !!v; else inp.value = v;
     const out = inp.parentElement.querySelector('output'); if (out) out.textContent = fmtVal(v);
+    const isKeyed = keyed.has(inp.dataset.k); inp.disabled = isKeyed; inp.title = isKeyed ? 'Keyframed — edit its keys in Keyframes' : '';
+    const lab = inp.closest('.gen-field'); if (lab) lab.classList.toggle('keyed', [...lab.querySelectorAll('[data-k]')].some(i => keyed.has(i.dataset.k)));
   });
   document.querySelectorAll('#genMods details[data-when]').forEach(d => { const w = d.dataset.when; d.hidden = !!w && w !== G.S.pattern; });
+  renderTracks();
+}
+/* Anything about the settings changed outside a plain field: redraw, re-range, save, regenerate. */
+function settingsChanged() {
+  refreshControls(); fillPresets(); setFrameRange();
+  G.frame = clamp(G.frame, 1, frameMaxOf(G.S)); $('#genFrame').value = G.frame; $('#genFrameNumber').value = G.frame;
+  saveSettings(); request(G.frame); notify();
+}
+function renderTracks() {
+  const root = $('#genTracks'); if (!root) return;
+  const tracks = G.S.keys || [];
+  root.innerHTML = tracks.length ? tracks.map((t, i) => `<div class="gen-track" data-track="${i}">
+      <div class="gen-track-head"><b>${keyLabel(t.path)}</b><select data-ease aria-label="Easing"><option value="bezier"${t.ease !== 'linear' ? ' selected' : ''}>Ease in and out</option><option value="linear"${t.ease === 'linear' ? ' selected' : ''}>Linear</option></select><button type="button" class="btn quiet" data-del title="Remove this keyframe track">Remove</button></div>
+      <div class="gen-keyrows"><div class="gen-keyrow head"><span>Frame</span><span>Value</span><span></span><span></span></div>${t.keys.slice().sort((a, b) => a[0] - b[0]).map(([f, v]) => `<div class="gen-keyrow" data-f="${f}"><input type="number" data-kf step="1" value="${f}" aria-label="Frame"><input type="number" data-kv step="0.01" value="${fmtVal(v)}" aria-label="Value"><button type="button" class="btn quiet" data-go title="Go to this frame">›</button><button type="button" class="btn quiet" data-x title="Delete this key">×</button></div>`).join('')}</div>
+      <button type="button" class="btn quiet" data-addkey>+ Key at frame ${G.frame}</button>
+    </div>`).join('') : '<p class="hint">Nothing is keyframed. Pick a parameter below to animate it with keys.</p>';
+  root.querySelectorAll('.gen-track').forEach(el => {
+    const tr = tracks[+el.dataset.track];
+    el.querySelector('[data-ease]').addEventListener('change', e => { tr.ease = e.target.value; saveSettings(); request(G.frame); notify(); });
+    el.querySelector('[data-del]').addEventListener('click', () => { G.S.keys.splice(+el.dataset.track, 1); settingsChanged(); });
+    el.querySelector('[data-addkey]').addEventListener('click', () => { const f = G.frame; const k = tr.keys.find(k => k[0] === f); const v = +valueAt(G.S, tr.path, f) || 0; if (k) k[1] = v; else tr.keys.push([f, v]); settingsChanged(); });
+    el.querySelectorAll('.gen-keyrow[data-f]').forEach(row => {
+      const key = tr.keys.find(k => k[0] === +row.dataset.f); if (!key) return;
+      row.querySelector('[data-kf]').addEventListener('change', e => { const f = Math.round(+e.target.value); if (!isFinite(f)) return; key[0] = f; row.dataset.f = f; settingsChanged(); });
+      row.querySelector('[data-kv]').addEventListener('input', e => { const v = +e.target.value; if (!isFinite(v)) return; key[1] = v; saveSettings(); request(G.frame); notify(); });
+      row.querySelector('[data-go]').addEventListener('click', () => { play(false); setFrame(key[0]); renderTracks(); });
+      row.querySelector('[data-x]').addEventListener('click', () => { tr.keys = tr.keys.filter(k => k !== key); if (!tr.keys.length) G.S.keys.splice(G.S.keys.indexOf(tr), 1); settingsChanged(); });
+    });
+  });
 }
 function applySettings(S) {
   G.S = S; refreshControls(); fillPresets();
@@ -311,18 +350,27 @@ for panel, name, value in VALUES:
                 done += 1
             except Exception as exc:
                 print("ProtoSpace: could not set", panel, name, exc)
-KEYED = ${S.keyed && S.keyed.enabled ? JSON.stringify([S.keyed.axis, S.keyed.f0, S.keyed.v0, S.keyed.f1, S.keyed.v1]) : 'None'}
-if KEYED:
-    axis, f0, v0, f1, v1 = KEYED
-    off = next(it for it in items if it.name == "Offset" and (it.parent.name if it.parent else "") == "Pattern")
-    path = f'modifiers["{mod.name}"].properties.inputs.{off.identifier}.value'
-    for frame, value in ((f0, v0), (f1, v1)):
-        vec = list(mod.properties.inputs[off.identifier]["value"]); vec[axis] = value
-        mod.properties.inputs[off.identifier]["value"] = vec
-        ob.keyframe_insert(data_path=path, index=axis, frame=frame)
+TRACKS = ${JSON.stringify((S.keys || []).map(t => { const k = KEYABLE.find(k => k[0] === t.path); return k ? [k[2], k[3], k[4], t.ease === 'linear' ? 'LINEAR' : 'BEZIER', t.keys.slice().sort((a, b) => a[0] - b[0])] : null; }).filter(Boolean))}
+prefs = bpy.context.preferences.edit
+was_interp = prefs.keyframe_new_interpolation_type
+for panel, name, index, interp, keys in TRACKS:
+    it = next((it for it in items if it.name == name and (it.parent.name if it.parent else "") == panel), None)
+    if it is None:
+        print("ProtoSpace: no input", panel, name); continue
+    path = f'modifiers["{mod.name}"].properties.inputs.{it.identifier}.value'
+    prefs.keyframe_new_interpolation_type = interp
+    for frame, value in keys:
+        if index >= 0:
+            vec = list(mod.properties.inputs[it.identifier]["value"]); vec[index] = value
+            mod.properties.inputs[it.identifier]["value"] = vec
+            ob.keyframe_insert(data_path=path, index=index, frame=frame)
+        else:
+            mod.properties.inputs[it.identifier]["value"] = value
+            ob.keyframe_insert(data_path=path, frame=frame)
+prefs.keyframe_new_interpolation_type = was_interp
 ob.update_tag(); bpy.context.view_layer.update()
 bpy.context.scene.frame_set(${G.frame})
-print(f"ProtoSpace: set {done} of {len(VALUES)} inputs on {ob.name} ▸ {mod.name}; frame ${G.frame}")
+print(f"ProtoSpace: set {done} of {len(VALUES)} inputs and {len(TRACKS)} keyframe tracks on {ob.name} ▸ {mod.name}; frame ${G.frame}")
 `;
   download(new Blob([py], { type: 'text/x-python' }), 'protospace_generator_settings.py');
 }

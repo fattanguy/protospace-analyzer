@@ -14,7 +14,8 @@ Live at the Vercel deployment of this repository.
 
 - **Generator** — the animation. The *Modifiers* dropdown inside the picture holds every
   control of the Blender group with the same meaning (Pattern, Motion, Growth, Noise /
-  Voronoi, Slab) plus the Look of the model; every change shows at once. The timeline at
+  Voronoi, Slab), a *Keyframes* section where any numeric parameter can be driven by keys,
+  and the Look of the model; every change shows at once. The timeline at
   the bottom plays, steps and scrubs the frames. Below: *Analyze this frame*, *Save
   animation* (a named set of modifier values, kept in the browser), picture, turntable
   video, and the Blender settings file. The twelve ratings of the frame on screen update
@@ -49,8 +50,8 @@ Live at the Vercel deployment of this repository.
 noise (Jenkins lookup3 hash, 0.982 scaling, fBM with detail / roughness / lacunarity /
 distortion) and 4D Voronoi F1 (PCG hash, Euclidean / Manhattan / Chebychev, randomness, W,
 detail), the two-offset cross-fade that makes the loop seamless, the growth ramp (grow from
-→ full size at), invert, size steps, smallest / largest cube, and a keyframed Offset axis
-with Blender's Bezier easing. Checked against frames exported from the .blend: 99.6–99.99 %
+→ full size at), invert, size steps, smallest / largest cube, and keyframes on any numeric parameter
+(hold–ease–hold between keys, Blender's Bezier easing or linear). Checked against frames exported from the .blend: 99.6–99.99 %
 of cubes agree (the rest is 4-bit export rounding). A pool of Web Workers evaluates the
 72,447 points of the slab per frame. A cube counts as mass when it reaches 53 % of its full
 size.
