@@ -311,3 +311,7 @@
   .prog-results button:hover { color: var(--red); }
   #progView { display: block; max-width: 100%; }
   @media (max-width: 960px) { .prog-deep { grid-template-columns: 1fr; } }
+
+/* Program: export the bay on screen */
+.prog-export { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 4px; }
+.prog-export .lbl { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink3); margin-right: 4px; }

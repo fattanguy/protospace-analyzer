@@ -463,6 +463,9 @@ function boot() {
   A.anv = createViewer($('#anViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, view: 'iso', color: 'foam', style: 'blocks', ratio: 0.5, emptyText: 'Pick an animation and a frame above.', onReady: () => { A.anvWin = undefined; if (A.item) renderAll(); } });
   A.pv = createViewer($('#progViewer'), { panel: 'none', overlay: true, sections: [], boxDrag: false, view: 'iso', color: 'foam', ratio: 0.62, emptyText: 'Pick an animation and a frame above.' });
   const hs = $('#progHl'); hs.innerHTML = HIGHLIGHTS.map(([k, t]) => `<option value="${k}">${t}</option>`).join(''); hs.value = A.hl;
+  const bayFile = () => `ProtoSpace-${animName(A.animId).replace(/[^\w]+/g, '_').replace(/^_|_$/g, '')}-frame${String(A.frame).padStart(4, '0')}-bay${A.bay + 1}-blocks`;
+  $('#progObj').addEventListener('click', () => { if (A.pv && A.item && A.item.bays) A.pv.exportOBJ(bayFile()); });
+  $('#progStl').addEventListener('click', () => { if (A.pv && A.item && A.item.bays) A.pv.exportSTL(bayFile()); });
   hs.addEventListener('change', () => { A.hl = hs.value; if (A.item && A.item.bays && A.pv) { const b = A.item.bays[A.bay]; A.pv.setHighlight(highlightCells(A.item.vox, THR, b.box, A.hl, b.result), hlOpts()); } });
   const pd = $('#progDepth'); pd.addEventListener('change', () => { A.progDepth = pd.checked; $('#progDepthWrap').hidden = !A.progDepth; if (A.progDepth && A.item && A.item.bays) drawDiagram($('#progView'), A.item.bays[A.bay].grid, A.item.bays[A.bay].result, A.progWord, '#c62828'); });
   $('#progScanGo').addEventListener('click', scanAnimation);

@@ -621,12 +621,13 @@ export function createViewer(root, opts = {}) {
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
     mesh.name = 'ProtoSpace frame'; return mesh;
   }
-  function exportOBJ() {
+  /* name: optional file name without extension (the Program tab names the bay it exports). */
+  function exportOBJ(name) {
     if (!M.cells) return;
-    const text = `# ProtoSpace Analyzer — ${M.source.name}. The cube lattice (1 cube = 1 m). X along the slab, Y up, Z toward the viewer (front face at z = 0).\n` + new OBJExporter().parse(exportMesh());
-    download(new Blob([text], { type: 'text/plain' }), baseName() + '.obj');
+    const text = `# ProtoSpace Analyzer — ${M.source.name}. The cube lattice as fused blocks (1 unit = 1 m). X along the slab, Y up, Z toward the viewer (front face at z = 0). In Rhino: Map OBJ Y to Rhino Z.\n` + new OBJExporter().parse(exportMesh());
+    download(new Blob([text], { type: 'text/plain' }), (typeof name === 'string' && name ? name : baseName()) + '.obj');
   }
-  function exportSTL() { if (!M.cells) return; download(new Blob([new STLExporter().parse(exportMesh(), { binary: true })], { type: 'model/stl' }), baseName() + '.stl'); }
+  function exportSTL(name) { if (!M.cells) return; download(new Blob([new STLExporter().parse(exportMesh(), { binary: true })], { type: 'model/stl' }), (typeof name === 'string' && name ? name : baseName()) + '.stl'); }
   function exportGLB() {
     if (!M.cells) return;
     const group = new THREE.Group(); group.add(exportMesh());
