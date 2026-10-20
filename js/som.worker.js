@@ -87,11 +87,11 @@ function train(m) {
   // where every design lives, and how far every node is from the nearest design (its 'explored-ness')
   const bmu = [], bmuD = [];
   for (let i = 0; i < nOwn; i++) { const [k, d] = bmuOf(pool[i * (symmetry ? 4 : 1)]); bmu.push(k); bmuD.push(d); }
-  const nearest = new Int32Array(K), nearDist = new Float32Array(K);
+  const nearest = new Int32Array(K), nearDist = new Float32Array(K), dists = new Float32Array(K * nOwn);   // every node to every design
   for (let k = 0; k < K; k++) {
     let best = -1, bd = Infinity;
-    for (let i = 0; i < nOwn; i++) { const d = dist(k, pool[i * (symmetry ? 4 : 1)]); if (d < bd) { bd = d; best = i; } }
+    for (let i = 0; i < nOwn; i++) { const d = dist(k, pool[i * (symmetry ? 4 : 1)]); dists[k * nOwn + i] = d; if (d < bd) { bd = d; best = i; } }
     nearest[k] = best; nearDist[k] = bd;
   }
-  self.postMessage({ type: 'done', it: iters, weights: Wt, bmu, bmuD, nearest, nearDist, stopped: stop }, [Wt.buffer, nearest.buffer, nearDist.buffer]);
+  self.postMessage({ type: 'done', it: iters, weights: Wt, bmu, bmuD, nearest, nearDist, dists, stopped: stop }, [Wt.buffer, nearest.buffer, nearDist.buffer, dists.buffer]);
 }

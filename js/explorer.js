@@ -11,8 +11,14 @@ import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, occupancyOf
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-const HUES = [4, 36, 56, 96, 152, 190, 214, 262, 300, 330];
-const colorOf = i => `hsl(${HUES[i % HUES.length]} 62% ${i < HUES.length ? 56 : 42}%)`;
+const HUES = [20, 196, 42, 262, 150, 330, 212, 72, 300, 100, 240, 0, 176, 48, 285];
+const hsl = (h, s, l) => { s /= 100; l /= 100; const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return '#' + [f(0), f(8), f(4)].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''); };
+/* Each design gets two colours, top and base; its solid is painted top to bottom with them, and a blend of designs is painted with the blend of their colours. */
+const colorsOf = i => { const h = HUES[i % HUES.length]; return [hsl(h, 70, 58), hsl((h + 40) % 360, 55, 36)]; };
+const colorOf = i => colorsOf(i)[0];
+const rgbOf = hex => [1, 3, 5].map(o => parseInt(hex.slice(o, o + 2), 16) / 255);
+const hexOf = rgb => '#' + rgb.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
+const SPIN = 24;                                                                  // frames in a turning preview
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -31,14 +37,15 @@ function makeThumbs() {
   const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.08; scene.add(sun); scene.add(sun.target);
   const fill = new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(60, 20, -40); scene.add(fill);
   const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 2000);
-  const mat = new THREE.MeshStandardMaterial({ color: 0xf2efe9, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
   const dark = () => { const t = document.documentElement.dataset.theme; return t === 'dark' || (t !== 'light' && !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)); };
   const baseMat = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 1 });
   let mesh = null, base = null;
-  function geometryOf(occ, N) {                                                   // the solid's outer faces, one quad each
+  function geometryOf(occ, N, colors) {                                           // the solid's outer faces, one quad each, painted top to base
     const at = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < N && y < N && z < N && occ[x + N * (y + N * z)];
-    const pos = [], nor = [], idx = []; let n = 0;
-    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
+    const pos = [], nor = [], col = [], idx = []; let n = 0;
+    const [top, base] = colors, top3 = rgbOf(top), base3 = rgbOf(base);
+    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); const t = Math.pow(p[1] / N, 0.8); col.push(base3[0] + (top3[0] - base3[0]) * t, base3[1] + (top3[1] - base3[1]) * t, base3[2] + (top3[2] - base3[2]) * t); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
     for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       if (!occ[x + N * (y + N * z)]) continue;
       const x0 = x, x1 = x + 1, y0 = y, y1 = y + 1, z0 = z, z1 = z + 1;
@@ -50,30 +57,37 @@ function makeThumbs() {
       if (!at(x, y - 1, z)) quad([x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0], 0, -1, 0);
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setIndex(idx);
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(idx);
     return g;
   }
-  function render(occ, N) {
+  function place(occ, N, colors) {
     if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); } if (base) scene.remove(base);
-    mesh = new THREE.Mesh(geometryOf(occ, N), mat); mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
+    mesh = new THREE.Mesh(geometryOf(occ, N, colors || ['#f2efe9', '#d8d3cc']), mat); mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
     base = new THREE.Mesh(new THREE.BoxGeometry(N + 4, 0.5, N + 4), baseMat); base.position.set(N / 2, 0.75, -N / 2); base.receiveShadow = true; scene.add(base);
-    const ctr = new THREE.Vector3(N / 2, N * 0.38, -N / 2), dir = new THREE.Vector3(-0.95, 0.72, 1.25).normalize();
-    camera.position.copy(ctr).addScaledVector(dir, N * 2.55); camera.lookAt(ctr); camera.updateProjectionMatrix();
+    const ctr = new THREE.Vector3(N / 2, N * 0.38, -N / 2);
     sun.position.copy(ctr).add(new THREE.Vector3(-0.55, 1, 0.75).multiplyScalar(N * 1.6)); sun.target.position.copy(ctr);
     const sc = sun.shadow.camera; sc.left = sc.bottom = -N; sc.right = sc.top = N; sc.near = 1; sc.far = N * 5; sc.updateProjectionMatrix();
     baseMat.color.set(dark() ? 0x1c1c1c : 0xe6e1db); hemi.groundColor.set(dark() ? 0x3a3a3a : 0xb5aea6);
+    return ctr;
+  }
+  function shoot(ctr, N, angle, size) {
+    if (size && renderer.domElement.width !== size) renderer.setSize(size, size);
+    const dir = new THREE.Vector3(-0.95, 0.72, 1.25).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+    camera.position.copy(ctr).addScaledVector(dir, N * 2.55); camera.lookAt(ctr); camera.updateProjectionMatrix();
     renderer.render(scene, camera);
     return renderer.domElement.toDataURL('image/png');
   }
-  return { render };
+  function render(occ, N, colors) { const ctr = place(occ, N, colors); return shoot(ctr, N, 0, S); }
+  function turntable(occ, N, colors, frames = SPIN, size = 144) { const ctr = place(occ, N, colors); const out = []; for (let i = 0; i < frames; i++) out.push(shoot(ctr, N, i * 2 * Math.PI / frames, size)); return out; }
+  return { render, turntable };
 }
 
 // ------------------------------------------------------------------ designs
 function addDesign(name, occ, N, extra = {}) {
   const sdf = signedDistance(occ, N);
   const d = { id: Math.random().toString(36).slice(2, 8), name, occ, N, sdf, crit: E.criteria.map(() => 0.5), ...extra };
-  d.letter = LETTERS[E.designs.length % LETTERS.length]; d.color = colorOf(E.designs.length);
-  E.designs.push(d);
+  d.letter = LETTERS[E.designs.length % LETTERS.length]; d.colors = colorsOf(E.designs.length); d.color = d.colors[0];
+  E.designs.push(d); spinDesign(d);
   if (E.hooks.rate && E.criteria.length) autoRate(d);
   return d;
 }
@@ -98,7 +112,31 @@ function autoRate(d) {
   const r = E.hooks.rate(toVox(d.occ, E.N)); if (!r) return;
   E.criteria.forEach((c, i) => { if (r[c] != null) d.crit[i] = clamp(r[c] / 100, 0, 1); });
 }
-function removeDesign(id) { E.designs = E.designs.filter(d => d.id !== id); E.designs.forEach((d, i) => { d.letter = LETTERS[i % LETTERS.length]; d.color = colorOf(i); }); E.map = null; renderAll(); }
+function removeDesign(id) { E.designs = E.designs.filter(d => d.id !== id); E.designs.forEach((d, i) => { d.letter = LETTERS[i % LETTERS.length]; }); E.map = null; renderAll(); }
+function spinDesign(d) { if (!E.thumbs) E.thumbs = makeThumbs(); d.spin = E.thumbs.turntable(d.occ, d.N, d.colors); }
+/* The colours of a tile: every design pulls on it, the near ones much more (inverse distance), so a home tile shows
+   its design's own colours and a tile between designs shows the blend of theirs. */
+function tileColors(n) {
+  const m = E.map, nD = E.designs.length; if (!m || !nD || !m.dists) return ['#f2efe9', '#d8d3cc'];
+  let top = [0, 0, 0], base = [0, 0, 0], sum = 0;
+  for (let i = 0; i < nD; i++) { const w = 1 / Math.pow(m.dists[n.k * nD + i] + 1e-6, 2.5); sum += w; const [t, b] = [rgbOf(E.designs[i].colors[0]), rgbOf(E.designs[i].colors[1])]; for (let c = 0; c < 3; c++) { top[c] += w * t[c]; base[c] += w * b[c]; } }
+  return [hexOf(top.map(v => v / sum)), hexOf(base.map(v => v / sum))];
+}
+function tileMix(n) {                                                            // the share of each design in a tile, for the legend
+  const m = E.map, nD = E.designs.length, w = []; let sum = 0;
+  for (let i = 0; i < nD; i++) { const v = 1 / Math.pow(m.dists[n.k * nD + i] + 1e-6, 2.5); w.push(v); sum += v; }
+  return w.map((v, i) => [i, v / sum]).sort((a, b) => b[1] - a[1]);
+}
+let spinTimer = null;
+function startSpin() {                                                           // every turning preview on the page advances together
+  if (spinTimer) return;
+  let f = 0;
+  spinTimer = setInterval(() => {
+    f = (f + 1) % SPIN;
+    for (const d of E.designs) { const im = R.designs.querySelector(`[data-spin="${d.id}"]`); if (im && d.spin) im.src = d.spin[f]; }
+    const t = R.detail.querySelector('[data-spin="tile"]'); if (t && E.tileSpin) t.src = E.tileSpin[f];
+  }, 90);
+}
 
 // ------------------------------------------------------------------ the map
 function train() {
@@ -117,7 +155,8 @@ function train() {
         const occ = occupancyOf(sdf, fill); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
         nodes.push({ k, x: k % E.W, y: (k / E.W) | 0, sdf, occ, crit, filled, nearest: m.nearest[k], nearDist: m.nearDist[k], thumb: null });
       }
-      E.map = { nodes, weights: m.weights, bmu: m.bmu, bmuD: m.bmuD, W: E.W, H: E.H, N, criteria: E.criteria.slice(), umax: 0, nearMax: Math.max(1e-9, ...nodes.map(n => n.nearDist)) };
+      E.map = { nodes, weights: m.weights, bmu: m.bmu, bmuD: m.bmuD, dists: m.dists, W: E.W, H: E.H, N, criteria: E.criteria.slice(), umax: 0, nearMax: Math.max(1e-9, ...nodes.map(n => n.nearDist)) };
+      nodes.forEach(n => { n.colors = tileColors(n); });
       E.map.u = umatrix(E.map);
       E.busy = false; w.terminate(); E.worker = null;
       setRun(m.stopped ? `Stopped at ${m.it} iterations` : `Done · ${E.iters} iterations · ${E.W}×${E.H} tiles`, 1);
@@ -172,13 +211,16 @@ let R = {};                                                                     
 function setRun(text, frac) { R.run.textContent = text; R.bar.style.width = `${Math.round(frac * 100)}%`; R.start.disabled = E.busy || E.designs.length < 2; R.stop.hidden = !E.busy; R.start.hidden = E.busy; }
 function renderDesigns() {
   R.designs.innerHTML = E.designs.map(d => `<div class="xp-design" data-id="${d.id}">
-      <span class="xp-letter" style="--c:${d.color}">${d.letter}</span>
+      <span class="xp-letter" style="--c:${d.colors[0]}">${d.letter}</span>
       <span class="xp-name" title="${esc(d.note ? d.name + ' · ' + d.note : d.name)}">${esc(d.name)}</span>
       <span class="xp-fill num">${(d.filled / (E.N ** 3) * 100).toFixed(0)}%</span>
       <button type="button" class="xp-x" data-remove="${d.id}" aria-label="Remove ${esc(d.name)}">×</button>
+      <img class="xp-spin" data-spin="${d.id}" src="${d.spin ? d.spin[0] : ''}" alt="" title="${esc(d.name)}, turning">
+      <span class="xp-colors"><label title="Top colour"><input type="color" value="${d.colors[0]}" data-color="${d.id}:0"></label><span class="xp-ramp" style="--a:${d.colors[0]};--b:${d.colors[1]}"></span><label title="Base colour"><input type="color" value="${d.colors[1]}" data-color="${d.id}:1"></label></span>
       ${E.criteria.length ? `<div class="xp-scores">${E.criteria.map((c, i) => `<label><span>${esc(c)}</span><input type="range" min="0" max="1" step="0.01" value="${d.crit[i]}" data-score="${d.id}:${i}"><output class="num">${d.crit[i].toFixed(2)}</output></label>`).join('')}</div>` : ''}
     </div>`).join('') || '<p class="hint">No designs yet. Drop closed solids above, or add the bays of the frame on screen.</p>';
   R.count.textContent = E.designs.length ? `${E.designs.length} design${E.designs.length > 1 ? 's' : ''} · ${E.N}³ voxels` : '';
+  if (E.designs.length) startSpin();
   R.start.disabled = E.busy || E.designs.length < 2;
   R.startHint.textContent = E.designs.length < 2 ? 'Two or more designs make a map.' : '';
 }
@@ -231,7 +273,7 @@ function renderThumbs() {                                                       
     if (E.map !== m) return;
     const t0 = performance.now();
     while (todo.length && performance.now() - t0 < 24) {
-      const n = todo.shift(); n.thumb = E.thumbs.render(n.occ, m.N);
+      const n = todo.shift(); n.thumb = E.thumbs.render(n.occ, m.N, n.colors);
       const el = R.grid.querySelector(`[data-k="${n.k}"]`); if (el && !el.querySelector('img')) el.insertAdjacentHTML('afterbegin', `<img src="${n.thumb}" alt="">`);
     }
     if (todo.length) requestAnimationFrame(step); else renderStrip();
@@ -250,8 +292,12 @@ function renderDetail() {
   R.detail.hidden = !n;
   if (!n) { if (E.viewer) E.viewer.setSource(null); return; }
   const near = E.designs[n.nearest], owners = m.bmu.map((k, i) => k === n.k ? E.designs[i] : null).filter(Boolean);
-  R.detailHead.innerHTML = `<span class="xp-letter" style="--c:${near ? near.color : 'var(--ink3)'}">${owners.length ? owners[0].letter : '·'}</span><b>Tile (${n.x}, ${n.y})</b><span class="hint">${esc(nodeName(n))}${near && !owners.length ? ` · closest to ${esc(near.name)}` : ''} · ${(n.filled / m.N ** 3 * 100).toFixed(0)}% solid</span>`;
-  R.detailCrit.innerHTML = E.criteria.length ? critBars(n.crit, E.tool === 'navigate') : '<p class="hint">No criteria yet.</p>';
+  R.detailHead.innerHTML = `<span class="xp-letter" style="--c:${n.colors ? n.colors[0] : 'var(--ink3)'}">${owners.length ? owners[0].letter : '·'}</span><b>Tile (${n.x}, ${n.y})</b><span class="hint">${esc(nodeName(n))}${near && !owners.length ? ` · closest to ${esc(near.name)}` : ''} · ${(n.filled / m.N ** 3 * 100).toFixed(0)}% solid</span>`;
+  if (!E.thumbs) E.thumbs = makeThumbs();
+  if (E.tileSpinKey !== `${m.N}:${n.k}:${m.nodes.length}`) { E.tileSpin = E.thumbs.turntable(n.occ, m.N, n.colors, SPIN, 180); E.tileSpinKey = `${m.N}:${n.k}:${m.nodes.length}`; }
+  const mix = m.dists ? tileMix(n).slice(0, 4).filter(([, w]) => w > 0.04) : [];
+  R.detailCrit.innerHTML = `<div class="xp-mixrow"><img class="xp-spin big" data-spin="tile" src="${E.tileSpin[0]}" alt="" title="This tile, turning"><div class="xp-mix"><span class="eyebrow">Made of</span>${mix.map(([i, w]) => { const d = E.designs[i]; return `<div class="xp-bar"><span><i class="xp-sw" style="--a:${d.colors[0]};--b:${d.colors[1]}"></i>${esc(d.name)}</span><span class="track"><span class="bar" style="width:${Math.round(w * 100)}%;background:${d.colors[0]}"></span></span><span class="num">${Math.round(w * 100)}%</span></div>`; }).join('')}</div></div>` + (E.criteria.length ? critBars(n.crit, E.tool === 'navigate') : '');
+  startSpin();
   R.pin.textContent = E.pins.includes(n.k) ? 'Unpin' : 'Pin';
   if (!E.viewer) E.viewer = createViewer(R.viewer, { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, view: 'iso', color: 'foam', style: 'blocks', ratio: 0.72, emptyText: 'Pick a tile.' });
   E.viewer.setSource({ name: `explorer tile ${n.x}-${n.y}`, vox: toVox(n.occ, m.N) }, null);
@@ -400,6 +446,14 @@ export function mount(root, hooks = {}) {
     btn.disabled = false; renderAll();
   }));
   R.designs.addEventListener('click', e => { const b = e.target.closest('[data-remove]'); if (b) removeDesign(b.dataset.remove); });
+  R.designs.addEventListener('input', e => {
+    const c = e.target.closest('[data-color]'); if (!c) return;
+    const [id, i] = c.dataset.color.split(':'), d = E.designs.find(d => d.id === id); if (!d) return;
+    d.colors[+i] = c.value; d.color = d.colors[0];
+    const ramp = c.closest('.xp-colors').querySelector('.xp-ramp'); ramp.style.setProperty(i === '0' ? '--a' : '--b', c.value);
+    c.closest('.xp-design').querySelector('.xp-letter').style.setProperty('--c', d.colors[0]);
+    clearTimeout(d.colorTimer); d.colorTimer = setTimeout(() => { spinDesign(d); if (E.map) { E.map.nodes.forEach(n => { n.colors = tileColors(n); n.thumb = null; }); E.tileSpinKey = null; renderMap(); renderDetail(); } }, 250);
+  });
   R.designs.addEventListener('input', e => { const s = e.target.closest('[data-score]'); if (!s) return; const [id, i] = s.dataset.score.split(':'); const d = E.designs.find(d => d.id === id); if (d) { d.crit[+i] = +s.value; s.nextElementSibling.textContent = (+s.value).toFixed(2); E.map = null; } });
   // criteria
   R.addCrit.addEventListener('click', () => { E.criteria.push(`Criterion ${E.criteria.length + 1}`); E.designs.forEach(d => d.crit.push(0.5)); E.targets.push(0.5); E.map = null; renderAll(); });
@@ -460,7 +514,7 @@ function mapPicture() {
     const y0 = P + m.H * (T + G) - G + 24, colW = (W - 2 * P) / 2;
     g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillStyle = '#7d7d7d'; g.font = '500 11px Poppins, Arial, sans-serif';
     g.fillText(`${m.W}×${m.H} MAP · ${E.designs.length} DESIGNS · LETTER = A DESIGN'S HOME TILE · DOT = GENERATED BLEND`, P, y0);
-    E.designs.forEach((d, i) => { const x = P + (i % 2) * colW, y = y0 + 28 + Math.floor(i / 2) * 26; g.fillStyle = d.color; g.fillRect(x, y - 9, 18, 18); g.textAlign = 'center'; g.fillStyle = '#111'; g.font = '700 10px Poppins, Arial, sans-serif'; g.fillText(d.letter, x + 9, y); g.textAlign = 'left'; g.fillStyle = '#e8e8e8'; g.font = '400 13px Poppins, Arial, sans-serif'; g.fillText(d.name, x + 26, y); });
+    E.designs.forEach((d, i) => { const x = P + (i % 2) * colW, y = y0 + 28 + Math.floor(i / 2) * 26; const gr = g.createLinearGradient(x, y - 9, x, y + 9); gr.addColorStop(0, d.colors[0]); gr.addColorStop(1, d.colors[1]); g.fillStyle = gr; g.fillRect(x, y - 9, 18, 18); g.textAlign = 'center'; g.fillStyle = '#111'; g.font = '700 10px Poppins, Arial, sans-serif'; g.fillText(d.letter, x + 9, y); g.textAlign = 'left'; g.fillStyle = '#e8e8e8'; g.font = '400 13px Poppins, Arial, sans-serif'; g.fillText(d.name, x + 26, y); });
     c.toBlob(b => { const u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = `ProtoSpace-explorer-map-${m.W}x${m.H}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, 'image/png');
   });
 }
