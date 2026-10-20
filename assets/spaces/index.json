@@ -1,0 +1,137 @@
+[
+{
+"id": "01",
+"name": "Atrium lobby",
+"file": "assets/spaces/01.glb",
+"frame": 231,
+"anim": "Voronoi",
+"bay": 4,
+"rating": "Interlocking 100/100"
+},
+{
+"id": "02",
+"name": "Distribution lobby",
+"file": "assets/spaces/02.glb",
+"frame": 93,
+"anim": "Noise",
+"bay": 7,
+"rating": "Decentralized 100/100"
+},
+{
+"id": "03",
+"name": "Covered forecourt lobby",
+"file": "assets/spaces/03.glb",
+"frame": 60,
+"anim": "Voronoi",
+"bay": 6,
+"rating": "Networked 100/100"
+},
+{
+"id": "04",
+"name": "Through-passage lobby",
+"file": "assets/spaces/04.glb",
+"frame": 75,
+"anim": "Voronoi",
+"bay": 4,
+"rating": "Intimate 100/100"
+},
+{
+"id": "05",
+"name": "Gateway lobby",
+"file": "assets/spaces/05.glb",
+"frame": 115,
+"anim": "Voronoi",
+"bay": 4,
+"rating": "Intimate 100/100"
+},
+{
+"id": "06",
+"name": "Small team enclave",
+"file": "assets/spaces/06.glb",
+"frame": 101,
+"anim": "Noise",
+"bay": 7,
+"rating": "Porous 100/100"
+},
+{
+"id": "07",
+"name": "Team cluster workspace",
+"file": "assets/spaces/07.glb",
+"frame": 41,
+"anim": "Voronoi",
+"bay": 4,
+"rating": "Layered 99/100"
+},
+{
+"id": "08",
+"name": "Interlocking work terraces",
+"file": "assets/spaces/08.glb",
+"frame": 143,
+"anim": "Voronoi",
+"bay": 6,
+"rating": "Visually Connected 100/100"
+},
+{
+"id": "09",
+"name": "Work island landscape",
+"file": "assets/spaces/09.glb",
+"frame": 181,
+"anim": "Voronoi",
+"bay": 8,
+"rating": "Socially Interactive 100/100"
+},
+{
+"id": "10",
+"name": "Modular office",
+"file": "assets/spaces/10.glb",
+"frame": 26,
+"anim": "Voronoi",
+"bay": 7,
+"rating": "Village-Like 100/100"
+},
+{
+"id": "11",
+"name": "Community common",
+"file": "assets/spaces/11.glb",
+"frame": 66,
+"anim": "Voronoi",
+"bay": 8,
+"rating": "Modular 100/100"
+},
+{
+"id": "12",
+"name": "Social street",
+"file": "assets/spaces/12.glb",
+"frame": 11,
+"anim": "Noise",
+"bay": 6,
+"rating": "Fragmented 100/100"
+},
+{
+"id": "13",
+"name": "Enclosed lounge",
+"file": "assets/spaces/13.glb",
+"frame": 198,
+"anim": "Voronoi",
+"bay": 5,
+"rating": "Porous 89/100"
+},
+{
+"id": "14",
+"name": "Stacked social terraces",
+"file": "assets/spaces/14.glb",
+"frame": 240,
+"anim": "Noise",
+"bay": 8,
+"rating": "Clustered 100/100"
+},
+{
+"id": "15",
+"name": "Distributed pockets",
+"file": "assets/spaces/15.glb",
+"frame": 181,
+"anim": "Noise",
+"bay": 4,
+"rating": "Networked 100/100"
+}
+]

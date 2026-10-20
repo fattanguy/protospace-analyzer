@@ -47,7 +47,8 @@ Live at the Vercel deployment of this repository.
   section and plan cuts; colour by depth, studio render, white model, cube size, spaces or
   levels; export PNG, turntable video, OBJ, GLB or STL (the cropped part when the box is on).
 - **Explorer** — a design space map. Drop closed solids (OBJ, STL, GLB, GLTF — SubD exports,
-  massing studies, printed bays) or add the five bays of the frame on screen; each becomes an
+  massing studies), add the fifteen printed spaces (`assets/spaces/*.glb`, the voxel bays
+  rounded into closed SubD-like solids) or the five bays of the frame on screen; each becomes an
   N³ voxel solid (`js/voxelize.js`: parity ray casting, then a signed distance field) with
   scores on criteria you name (set by hand, or the twelve descriptors rated automatically).
   A self-organizing map (`js/som.worker.js`, trained off the main thread on the designs plus

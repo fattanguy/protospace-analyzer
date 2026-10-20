@@ -1,7 +1,8 @@
 /* ProtoSpace Analyzer — the self-organizing map behind the Explorer tab (js/explorer.js), trained off the main thread.
 
-   A map is W × H nodes. Each node holds a vector: the signed-distance field of a solid (N³ values in [-1, 1]) followed
-   by its criteria scores (nC values in [0, 1]). Training shows the map one sample at a time — one of the uploaded
+   A map is W × H nodes. Each node holds a vector: the signed-distance field of a solid (N³ values in [-1, 1]), its
+   criteria scores (nC values in [0, 1]) and, last, how solid it is (the share of filled voxels). Averaged distance
+   fields of thin, different solids thin out, so the tile's solid is carved from its field down to that learned share. Training shows the map one sample at a time — one of the uploaded
    designs, or a synthetic in-between (two designs blended at a random mix, and, if asked, mirrored or turned); the
    closest node and its neighbours move toward it, the neighbourhood shrinking as training goes on. The result: every
    design has a home tile, neighbouring tiles blend smoothly between them, and the tiles in between are new designs.
@@ -25,25 +26,26 @@ function rotateY(a, N) { const b = new Float32Array(a.length); for (let z = 0; z
 
 function train(m) {
   const { N, nC, W, H, iters, mode, synth, symmetry, influence } = m;
-  const V = N * N * N, D = V + nC, K = W * H, rand = rng(m.seed || 7);
+  const V = N * N * N, D = V + nC + 1, K = W * H, rand = rng(m.seed || 7);
   // the sample pool: designs, plus their symmetry variants when asked
   const pool = [];
   for (const d of m.designs) {
-    const crit = Float32Array.from(d.crit); pool.push({ sdf: d.sdf, crit, own: true });
-    if (symmetry) { pool.push({ sdf: mirrorX(d.sdf, N), crit }); pool.push({ sdf: mirrorZ(d.sdf, N), crit }); pool.push({ sdf: rotateY(d.sdf, N), crit }); }
+    const crit = Float32Array.from(d.crit); let f = 0; for (let i = 0; i < V; i++) if (d.sdf[i] < 0) f++; const fill = f / V;
+    pool.push({ sdf: d.sdf, crit, fill, own: true });
+    if (symmetry) { pool.push({ sdf: mirrorX(d.sdf, N), crit, fill }); pool.push({ sdf: mirrorZ(d.sdf, N), crit, fill }); pool.push({ sdf: rotateY(d.sdf, N), crit, fill }); }
   }
   const nOwn = m.designs.length;
   // weights: start from random blends of the designs, so the map is plausible from the first frame
   const Wt = new Float32Array(K * D);
   const tmp = new Float32Array(D);
-  const blendInto = (out, a, b, t) => { for (let i = 0; i < V; i++) out[i] = a.sdf[i] * (1 - t) + b.sdf[i] * t; for (let c = 0; c < nC; c++) out[V + c] = a.crit[c] * (1 - t) + b.crit[c] * t; };
+  const blendInto = (out, a, b, t) => { for (let i = 0; i < V; i++) out[i] = a.sdf[i] * (1 - t) + b.sdf[i] * t; for (let c = 0; c < nC; c++) out[V + c] = a.crit[c] * (1 - t) + b.crit[c] * t; out[V + nC] = a.fill * (1 - t) + b.fill * t; };
   for (let k = 0; k < K; k++) {
     const a = pool[Math.floor(rand() * pool.length)], b = pool[Math.floor(rand() * pool.length)];
     blendInto(tmp, a, b, rand()); Wt.set(tmp, k * D);
   }
   // training schedule
   const span = Math.max(W, H);
-  const sigma0 = mode === 'cluster' ? Math.max(0.8, span * 0.3) : Math.max(1, span * 0.6), sigma1 = mode === 'cluster' ? 0.45 : 0.7;
+  const sigma0 = mode === 'cluster' ? Math.max(0.8, span * 0.3) : Math.max(1, span * 0.6), sigma1 = mode === 'cluster' ? 0.45 : 0.55;
   const lr0 = 0.6, lr1 = mode === 'cluster' ? 0.02 : 0.04;
   const wv = (1 - influence) / V, wc = nC ? influence / nC : 0;                 // the two halves of the distance
   const dist = (k, s) => {
@@ -54,7 +56,7 @@ function train(m) {
   };
   const bmuOf = s => { let best = 0, bd = Infinity; for (let k = 0; k < K; k++) { const d = dist(k, s); if (d < bd) { bd = d; best = k; } } return [best, bd]; };
   const pSynth = synth / (synth + pool.length);
-  const sample = { sdf: new Float32Array(V), crit: new Float32Array(nC) };
+  const sample = { sdf: new Float32Array(V), crit: new Float32Array(nC), fill: 0 };
   let last = performance.now();
   for (let it = 0; it < iters; it++) {
     if (stop) break;
@@ -67,6 +69,7 @@ function train(m) {
       const t = 0.15 + 0.7 * rand();
       for (let i = 0; i < V; i++) sample.sdf[i] = a.sdf[i] * (1 - t) + b.sdf[i] * t;
       for (let c = 0; c < nC; c++) sample.crit[c] = a.crit[c] * (1 - t) + b.crit[c] * t;
+      sample.fill = a.fill * (1 - t) + b.fill * t;
       s = sample;
     } else s = pool[Math.floor(rand() * pool.length)];
     const [b] = bmuOf(s), bx = b % W, by = (b / W) | 0, s2 = 2 * sigma * sigma;
@@ -76,6 +79,7 @@ function train(m) {
       const a = lr * g, o = k * D;
       for (let i = 0; i < V; i++) Wt[o + i] += a * (s.sdf[i] - Wt[o + i]);
       for (let c = 0; c < nC; c++) Wt[o + V + c] += a * (s.crit[c] - Wt[o + V + c]);
+      Wt[o + V + nC] += a * (s.fill - Wt[o + V + nC]);
     }
     const now = performance.now();
     if (now - last > 400) { last = now; self.postMessage({ type: 'progress', it: it + 1, iters }); }

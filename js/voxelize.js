@@ -35,6 +35,14 @@ export async function loadModel(file) {
   return new Float32Array(tris);
 }
 
+/* A model served by the site itself (assets/spaces/*.glb), as the same flat triangle list. */
+export async function loadModelUrl(url) {
+  const gltf = await new GLTFLoader().loadAsync(url), tris = [], v = new THREE.Vector3();
+  gltf.scene.updateMatrixWorld(true);
+  gltf.scene.traverse(o => { if (!o.isMesh) return; const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry, p = g.getAttribute('position'); for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); tris.push(v.x, v.y, v.z); } });
+  return new Float32Array(tris);
+}
+
 /* Parity fill: for every (x, y) column a ray along z crosses the surface an even number of times when the solid is
    closed; the voxels between the 1st and 2nd crossing, the 3rd and 4th… are inside. Triangles are bucketed by the
    columns they cover, so big SubD exports (hundreds of thousands of triangles) still take well under a second. */
@@ -113,7 +121,15 @@ export function signedDistance(occ, N, R = 6) {
   for (let i = 0; i < n; i++) { const v = occ[i] ? -Math.sqrt(dOut[i]) + 0.5 : Math.sqrt(dIn[i]) - 0.5; sdf[i] = Math.max(-1, Math.min(1, v / R)); }
   return sdf;
 }
-export function occupancyOf(sdf) { const o = new Uint8Array(sdf.length); for (let i = 0; i < sdf.length; i++) o[i] = sdf[i] < 0 ? 1 : 0; return o; }
+/* The solid of a (blended) field: inside where the field is negative — or, given a share of the cube to fill, the
+   voxels with the lowest field values up to that share, so a blend of thin solids does not thin out to nothing. */
+export function occupancyOf(sdf, fill) {
+  const o = new Uint8Array(sdf.length);
+  let thr = 0;
+  if (fill != null) { const n = Math.round(Math.min(0.9, Math.max(0, fill)) * sdf.length); const sorted = Float32Array.from(sdf).sort(); thr = n > 0 ? Math.min(0.6, Math.max(sorted[n - 1], -0.0001)) : -Infinity; if (n === 0) return o; }
+  for (let i = 0; i < sdf.length; i++) o[i] = sdf[i] <= thr ? 1 : 0;
+  return o;
+}
 export function toVox(occ, N) {
   const sizes = new Uint8Array(occ.length); for (let i = 0; i < occ.length; i++) sizes[i] = occ[i] ? 255 : 0;
   return { nx: N, ny: N, nz: N, sizes, max: 255, threshold: 128 };

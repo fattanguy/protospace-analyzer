@@ -6,7 +6,7 @@
    mount(root, hooks) → { show }    hooks.frameBays() → [{ name, vox, box }] | null, hooks.rate(vox) → { word: 0–100 } */
 import * as THREE from 'three';
 import { createViewer } from './viewer.js';
-import { ACCEPTS, loadModel, voxelize, signedDistance, occupancyOf, toVox } from './voxelize.js';
+import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, occupancyOf, toVox } from './voxelize.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -113,8 +113,8 @@ function train() {
     if (m.type === 'done') {
       const nodes = [];
       for (let k = 0; k < K; k++) {
-        const o = k * (V + E.criteria.length), sdf = m.weights.subarray(o, o + V), crit = Array.from(m.weights.subarray(o + V, o + V + E.criteria.length));
-        const occ = occupancyOf(sdf); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
+        const D = V + E.criteria.length + 1, o = k * D, sdf = m.weights.subarray(o, o + V), crit = Array.from(m.weights.subarray(o + V, o + V + E.criteria.length)), fill = m.weights[o + V + E.criteria.length];
+        const occ = occupancyOf(sdf, fill); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
         nodes.push({ k, x: k % E.W, y: (k / E.W) | 0, sdf, occ, crit, filled, nearest: m.nearest[k], nearDist: m.nearDist[k], thumb: null });
       }
       E.map = { nodes, weights: m.weights, bmu: m.bmu, bmuD: m.bmuD, W: E.W, H: E.H, N, criteria: E.criteria.slice(), umax: 0, nearMax: Math.max(1e-9, ...nodes.map(n => n.nearDist)) };
@@ -173,7 +173,7 @@ function setRun(text, frac) { R.run.textContent = text; R.bar.style.width = `${M
 function renderDesigns() {
   R.designs.innerHTML = E.designs.map(d => `<div class="xp-design" data-id="${d.id}">
       <span class="xp-letter" style="--c:${d.color}">${d.letter}</span>
-      <span class="xp-name" title="${esc(d.name)}">${esc(d.name)}</span>
+      <span class="xp-name" title="${esc(d.note ? d.name + ' · ' + d.note : d.name)}">${esc(d.name)}</span>
       <span class="xp-fill num">${(d.filled / (E.N ** 3) * 100).toFixed(0)}%</span>
       <button type="button" class="xp-x" data-remove="${d.id}" aria-label="Remove ${esc(d.name)}">×</button>
       ${E.criteria.length ? `<div class="xp-scores">${E.criteria.map((c, i) => `<label><span>${esc(c)}</span><input type="range" min="0" max="1" step="0.01" value="${d.crit[i]}" data-score="${d.id}:${i}"><output class="num">${d.crit[i].toFixed(2)}</output></label>`).join('')}</div>` : ''}
@@ -310,7 +310,7 @@ const HTML = `
   <aside class="xp-controls" aria-label="Controls">
     <h2 class="eyebrow">Designs</h2>
     <label class="xp-drop" data-v="drop"><input type="file" multiple accept=".obj,.stl,.glb,.gltf" hidden><b>Drop closed solids</b><span>OBJ · STL · GLB · GLTF → <output data-v="N">32</output>³ voxels</span><span class="hint" data-v="dropMsg"></span></label>
-    <div class="xp-row"><button type="button" class="btn quiet" data-v="addBays" title="The five bays of the frame open in Analyze / Program / 3D model, each as a design">Add the bays of the frame on screen</button><span class="hint" data-v="count"></span></div>
+    <div class="xp-row"><button type="button" class="btn quiet" data-v="addSpaces" title="The fifteen lobbies, workspaces and social areas picked from the loops, as the smooth solids they were printed from">Add the fifteen printed spaces</button><button type="button" class="btn quiet" data-v="addBays" title="The five bays of the frame open in Analyze / Program / 3D model, each as a design">Add the bays of the frame on screen</button><span class="hint" data-v="count"></span></div>
     <div data-v="designs" class="xp-designs"></div>
 
     <div class="xp-sect"><h2 class="eyebrow">Criteria</h2><div class="xp-row"><button type="button" class="btn quiet" data-v="addCrit">Add criterion</button><button type="button" class="btn quiet" data-v="addWords" title="The twelve descriptors of the project as criteria">The twelve descriptors</button></div></div>
@@ -379,6 +379,21 @@ export function mount(root, hooks = {}) {
     if (!bays || !bays.length) { R.dropMsg.textContent = 'Pick an animation and a frame in Analyze, Program or 3D model first.'; return; }
     bays.forEach(b => designFromVox(b.name, b.vox, b.box)); E.map = null; renderAll();
     R.dropMsg.textContent = `${bays.length} bays added from ${bays[0].frame}.`;
+  });
+  R.addSpaces.addEventListener('click', async () => {
+    R.addSpaces.disabled = true;
+    try {
+      const list = await (await fetch('assets/spaces/index.json')).json();
+      for (const it of list) {
+        if (E.designs.some(d => d.space === it.id)) continue;
+        R.dropMsg.textContent = `Reading ${it.id} ${it.name}…`;
+        const tris = await loadModelUrl(it.file), v = voxelize(tris, E.N);
+        addDesign(`${it.id} ${it.name}`, v.occ, E.N, { filled: v.filled, triangles: v.triangles, source: 'space', space: it.id, tris, note: `${it.anim} · frame ${it.frame} · bays ${it.bay}–${it.bay + 2} · ${it.rating}` });
+        E.map = null; renderDesigns();
+      }
+      R.dropMsg.textContent = `${list.length} spaces: the fifteen from the boards, smoothed the way they were printed.`;
+    } catch (err) { R.dropMsg.textContent = 'The spaces could not be loaded: ' + (err.message || err); }
+    R.addSpaces.disabled = false; renderAll();
   });
   R.designs.addEventListener('click', e => { const b = e.target.closest('[data-remove]'); if (b) removeDesign(b.dataset.remove); });
   R.designs.addEventListener('input', e => { const s = e.target.closest('[data-score]'); if (!s) return; const [id, i] = s.dataset.score.split(':'); const d = E.designs.find(d => d.id === id); if (d) { d.crit[+i] = +s.value; s.nextElementSibling.textContent = (+s.value).toFixed(2); E.map = null; } });
