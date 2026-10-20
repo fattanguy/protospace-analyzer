@@ -18,7 +18,6 @@ const colorsOf = i => { const h = HUES[i % HUES.length]; return [hsl(h, 70, 58),
 const colorOf = i => colorsOf(i)[0];
 const rgbOf = hex => [1, 3, 5].map(o => parseInt(hex.slice(o, o + 2), 16) / 255);
 const hexOf = rgb => '#' + rgb.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
-const SPIN = 48;                                                                  // frames in a turning preview (one turn every ~11 s)
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -77,9 +76,41 @@ function makeThumbs() {
     renderer.render(scene, camera);
     return renderer.domElement.toDataURL('image/png');
   }
-  function render(occ, N, colors) { const ctr = place(occ, N, colors); return shoot(ctr, N, 0, S); }
-  function turntable(occ, N, colors, frames = SPIN, size = 144) { const ctr = place(occ, N, colors, false); const out = []; for (let i = 0; i < frames; i++) out.push(shoot(ctr, N, i * 2 * Math.PI / frames, size)); return out; }   // the turning previews: no base, no shadow
-  return { render, turntable };
+  function render(occ, N, colors) { const ctr = place(occ, N, colors, false); return shoot(ctr, N, 0, S); }
+  /* Live turning previews: every registered canvas is redrawn each frame from its own mesh, turned by the clock, with
+     one shared renderer — smooth, and one WebGL context however many previews are on the page. */
+  const live = new Map(); let raf = null, t0 = performance.now();
+  const spinScene = new THREE.Scene(), spinCam = new THREE.PerspectiveCamera(30, 1, 0.5, 2000);
+  const spinHemi = new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 1.0), spinSun = new THREE.DirectionalLight(0xffffff, 2.0), spinFill = new THREE.DirectionalLight(0xffffff, 0.4);
+  spinScene.add(spinHemi, spinSun, spinSun.target, spinFill);
+  const spinRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); spinRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); spinRenderer.setSize(180, 180);
+  function tick(now) {
+    raf = null;
+    const angle = ((now - t0) / 12000) * 2 * Math.PI;                             // one turn every 12 s
+    let any = false;
+    for (const [canvas, e] of live) {
+      if (!canvas.isConnected) { live.delete(canvas); e.mesh.geometry.dispose(); continue; }
+      const r = canvas.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight || r.width === 0) { any = true; continue; }   // off screen: skip
+      any = true;
+      const size = Math.round(r.width) || 144; if (spinRenderer.domElement.width !== size * spinRenderer.getPixelRatio()) spinRenderer.setSize(size, size, false);
+      if (canvas.width !== spinRenderer.domElement.width) { canvas.width = spinRenderer.domElement.width; canvas.height = spinRenderer.domElement.height; }
+      spinScene.add(e.mesh);
+      const N = e.N, ctr = new THREE.Vector3(N / 2, N * 0.38, -N / 2);
+      const dir = new THREE.Vector3(-0.95, 0.72, 1.25).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+      spinCam.position.copy(ctr).addScaledVector(dir, N * 2.4); spinCam.lookAt(ctr); spinCam.updateProjectionMatrix();
+      spinSun.position.copy(ctr).add(new THREE.Vector3(-0.55, 1, 0.75).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle).multiplyScalar(N * 1.6)); spinSun.target.position.copy(ctr);
+      spinHemi.groundColor.set(dark() ? 0x3a3a3a : 0xb5aea6);
+      spinRenderer.render(spinScene, spinCam); spinScene.remove(e.mesh);
+      const g = canvas.getContext('2d'); g.clearRect(0, 0, canvas.width, canvas.height); g.drawImage(spinRenderer.domElement, 0, 0);
+    }
+    if (any) raf = requestAnimationFrame(tick);
+  }
+  function spin(canvas, occ, N, colors) {                                        // (re)register a canvas to show this solid turning
+    const old = live.get(canvas); if (old) old.mesh.geometry.dispose();
+    live.set(canvas, { mesh: new THREE.Mesh(geometryOf(occ, N, colors), mat), N });
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+  return { render, spin };
 }
 
 // ------------------------------------------------------------------ designs
@@ -87,7 +118,7 @@ function addDesign(name, occ, N, extra = {}) {
   const sdf = signedDistance(occ, N);
   const d = { id: Math.random().toString(36).slice(2, 8), name, occ, N, sdf, crit: E.criteria.map(() => 0.5), ...extra };
   d.letter = LETTERS[E.designs.length % LETTERS.length]; d.colors = colorsOf(E.designs.length); d.color = d.colors[0];
-  E.designs.push(d); spinDesign(d);
+  E.designs.push(d);
   if (E.hooks.rate && E.criteria.length) autoRate(d);
   return d;
 }
@@ -113,7 +144,7 @@ function autoRate(d) {
   E.criteria.forEach((c, i) => { if (r[c] != null) d.crit[i] = clamp(r[c] / 100, 0, 1); });
 }
 function removeDesign(id) { E.designs = E.designs.filter(d => d.id !== id); E.designs.forEach((d, i) => { d.letter = LETTERS[i % LETTERS.length]; }); E.map = null; renderAll(); }
-function spinDesign(d) { if (!E.thumbs) E.thumbs = makeThumbs(); d.spin = E.thumbs.turntable(d.occ, d.N, d.colors); }
+function spinDesign(d) { const c = R.designs && R.designs.querySelector(`[data-spin="${d.id}"]`); if (!c) return; if (!E.thumbs) E.thumbs = makeThumbs(); E.thumbs.spin(c, d.occ, d.N, d.colors); }
 /* The colours of a tile: every design pulls on it, the near ones much more (inverse distance), so a home tile shows
    its design's own colours and a tile between designs shows the blend of theirs. */
 function tileColors(n) {
@@ -127,16 +158,7 @@ function tileMix(n) {                                                           
   for (let i = 0; i < nD; i++) { const v = 1 / Math.pow(m.dists[n.k * nD + i] + 1e-6, 2.5); w.push(v); sum += v; }
   return w.map((v, i) => [i, v / sum]).sort((a, b) => b[1] - a[1]);
 }
-let spinTimer = null;
-function startSpin() {                                                           // every turning preview on the page advances together
-  if (spinTimer) return;
-  let f = 0;
-  spinTimer = setInterval(() => {
-    f = (f + 1) % SPIN;
-    for (const d of E.designs) { const im = R.designs.querySelector(`[data-spin="${d.id}"]`); if (im && d.spin) im.src = d.spin[f]; }
-    const t = R.detail.querySelector('[data-spin="tile"]'); if (t && E.tileSpin) t.src = E.tileSpin[f];
-  }, 230);
-}
+
 
 // ------------------------------------------------------------------ the map
 function train() {
@@ -215,12 +237,12 @@ function renderDesigns() {
       <span class="xp-name" title="${esc(d.note ? d.name + ' · ' + d.note : d.name)}">${esc(d.name)}</span>
       <span class="xp-fill num">${(d.filled / (E.N ** 3) * 100).toFixed(0)}%</span>
       <button type="button" class="xp-x" data-remove="${d.id}" aria-label="Remove ${esc(d.name)}">×</button>
-      <img class="xp-spin" data-spin="${d.id}" src="${d.spin ? d.spin[0] : ''}" alt="" title="${esc(d.name)}, turning">
+      <canvas class="xp-spin" data-spin="${d.id}" width="144" height="144" title="${esc(d.name)}, turning"></canvas>
       <span class="xp-colors"><label title="Top colour"><input type="color" value="${d.colors[0]}" data-color="${d.id}:0"></label><span class="xp-ramp" style="--a:${d.colors[0]};--b:${d.colors[1]}"></span><label title="Base colour"><input type="color" value="${d.colors[1]}" data-color="${d.id}:1"></label></span>
       ${E.criteria.length ? `<div class="xp-scores">${E.criteria.map((c, i) => `<label><span>${esc(c)}</span><input type="range" min="0" max="1" step="0.01" value="${d.crit[i]}" data-score="${d.id}:${i}"><output class="num">${d.crit[i].toFixed(2)}</output></label>`).join('')}</div>` : ''}
     </div>`).join('') || '<p class="hint">No designs yet. Drop closed solids above, or add the bays of the frame on screen.</p>';
   R.count.textContent = E.designs.length ? `${E.designs.length} design${E.designs.length > 1 ? 's' : ''} · ${E.N}³ voxels` : '';
-  if (E.designs.length) startSpin();
+  E.designs.forEach(spinDesign);
   R.start.disabled = E.busy || E.designs.length < 2;
   R.startHint.textContent = E.designs.length < 2 ? 'Two or more designs make a map.' : '';
 }
@@ -294,12 +316,11 @@ function renderDetail() {
   const near = E.designs[n.nearest], owners = m.bmu.map((k, i) => k === n.k ? E.designs[i] : null).filter(Boolean);
   R.detailHead.innerHTML = `<span class="xp-letter" style="--c:${n.colors ? n.colors[0] : 'var(--ink3)'}">${owners.length ? owners[0].letter : '·'}</span><b>Tile (${n.x}, ${n.y})</b><span class="hint">${esc(nodeName(n))}${near && !owners.length ? ` · closest to ${esc(near.name)}` : ''} · ${(n.filled / m.N ** 3 * 100).toFixed(0)}% solid</span>`;
   if (!E.thumbs) E.thumbs = makeThumbs();
-  if (E.tileSpinKey !== `${m.N}:${n.k}:${m.nodes.length}`) { E.tileSpin = E.thumbs.turntable(n.occ, m.N, n.colors, SPIN, 180); E.tileSpinKey = `${m.N}:${n.k}:${m.nodes.length}`; }
   const mix = m.dists ? tileMix(n).slice(0, 4).filter(([, w]) => w > 0.04) : [];
-  R.detailCrit.innerHTML = `<div class="xp-mixrow"><img class="xp-spin big" data-spin="tile" src="${E.tileSpin[0]}" alt="" title="This tile, turning"><div class="xp-mix"><span class="eyebrow">Made of</span>${mix.map(([i, w]) => { const d = E.designs[i]; return `<div class="xp-bar"><span><i class="xp-sw" style="--a:${d.colors[0]};--b:${d.colors[1]}"></i>${esc(d.name)}</span><span class="track"><span class="bar" style="width:${Math.round(w * 100)}%;background:${d.colors[0]}"></span></span><span class="num">${Math.round(w * 100)}%</span></div>`; }).join('')}</div></div>` + (E.criteria.length ? critBars(n.crit, E.tool === 'navigate') : '');
-  startSpin();
+  R.detailCrit.innerHTML = `<div class="xp-mixrow"><canvas class="xp-spin big" data-spin="tile" width="180" height="180" title="This tile, turning"></canvas><div class="xp-mix"><span class="eyebrow">Made of</span>${mix.map(([i, w]) => { const d = E.designs[i]; return `<div class="xp-bar"><span><i class="xp-sw" style="--a:${d.colors[0]};--b:${d.colors[1]}"></i>${esc(d.name)}</span><span class="track"><span class="bar" style="width:${Math.round(w * 100)}%;background:${d.colors[0]}"></span></span><span class="num">${Math.round(w * 100)}%</span></div>`; }).join('')}</div></div>` + (E.criteria.length ? critBars(n.crit, E.tool === 'navigate') : '');
+  E.thumbs.spin(R.detailCrit.querySelector('[data-spin="tile"]'), n.occ, m.N, n.colors);
   R.pin.textContent = E.pins.includes(n.k) ? 'Unpin' : 'Pin';
-  if (!E.viewer) E.viewer = createViewer(R.viewer, { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, view: 'iso', color: 'foam', style: 'blocks', ratio: 0.72, emptyText: 'Pick a tile.' });
+  if (!E.viewer) E.viewer = createViewer(R.viewer, { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, base: false, view: 'iso', color: 'foam', style: 'blocks', ratio: 0.72, emptyText: 'Pick a tile.' });
   E.viewer.setSource({ name: `explorer tile ${n.x}-${n.y}`, vox: toVox(n.occ, m.N) }, null);
 }
 function renderStrip() {                                                         // Compare and Path: the pinned tiles or the path, side by side
@@ -452,7 +473,7 @@ export function mount(root, hooks = {}) {
     d.colors[+i] = c.value; d.color = d.colors[0];
     const ramp = c.closest('.xp-colors').querySelector('.xp-ramp'); ramp.style.setProperty(i === '0' ? '--a' : '--b', c.value);
     c.closest('.xp-design').querySelector('.xp-letter').style.setProperty('--c', d.colors[0]);
-    clearTimeout(d.colorTimer); d.colorTimer = setTimeout(() => { spinDesign(d); if (E.map) { E.map.nodes.forEach(n => { n.colors = tileColors(n); n.thumb = null; }); E.tileSpinKey = null; renderMap(); renderDetail(); } }, 250);
+    clearTimeout(d.colorTimer); d.colorTimer = setTimeout(() => { spinDesign(d); if (E.map) { E.map.nodes.forEach(n => { n.colors = tileColors(n); n.thumb = null; }); renderMap(); renderDetail(); } }, 250);
   });
   R.designs.addEventListener('input', e => { const s = e.target.closest('[data-score]'); if (!s) return; const [id, i] = s.dataset.score.split(':'); const d = E.designs.find(d => d.id === id); if (d) { d.crit[+i] = +s.value; s.nextElementSibling.textContent = (+s.value).toFixed(2); E.map = null; } });
   // criteria

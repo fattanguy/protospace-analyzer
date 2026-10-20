@@ -459,7 +459,7 @@ export function createViewer(root, opts = {}) {
     M.boxLines.material.color.set(dk ? 0xe8e8e8 : BOX_LINE); M.boxFill.material.color.set(dk ? 0xffffff : 0x3a3a3a);
     M.hemi.visible = M.light.visible = M.fill.visible = !unlit;
     const depth = v.nz;
-    if (!unlit) {
+    if (!unlit && opts.base !== false) {
       const base = new THREE.Mesh(new THREE.BoxGeometry(v.nx + 6, 0.6, depth + 6), new THREE.MeshStandardMaterial({ color: dk ? 0x1c1c1c : 0xe6e1db, roughness: 1 }));
       base.position.set(v.nx / 2, C.rBase - 0.3, -depth / 2 + 1); base.receiveShadow = s.shadows; M.scene.add(base); M.base = base;
     }
