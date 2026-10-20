@@ -84,7 +84,7 @@ export function voxelize(tris, N) {
       for (let z = za; z <= zb; z++) { const zi = N - 1 - z; occ[x + N * (y + N * zi)] = 1; filled++; }      // z = 0 is the front
     }
   }
-  return { occ, filled, triangles: T, scale: s, size };
+  return { occ, filled, triangles: T, scale: s, size, fit: { min: mn, scale: s, off } };   // fit: model → lattice units, P = (p − min) · scale + off
 }
 
 /* Squared Euclidean distance transform (Felzenszwalb & Huttenlocher), one axis at a time. */

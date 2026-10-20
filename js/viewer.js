@@ -435,11 +435,16 @@ export function createViewer(root, opts = {}) {
     }
     const C = computeCells(); M.cells = C;
     const s = M.settings, v = M.source.vox, unlit = s.color === 'render', b = M.box;
-    empty.hidden = C.cells.length > 0;
+    empty.hidden = C.cells.length > 0 || !!M.source.mesh;
     if (!C.cells.length) { empty.textContent = b.on && !b.outline ? 'Nothing solid inside the box — move it or make it bigger.' : 'No cube reaches the mass threshold, so there is nothing to model.'; }
     const matOpts = { side: THREE.DoubleSide, shadowSide: THREE.BackSide, clipShadows: true };
     let cubeCount = 0, tris = 0;
-    if (C.cells.length) {
+    if (M.source.mesh) {                                                         // a surface supplied with the voxels (the Explorer's imported designs): drawn as it is
+      const geo = M.source.mesh.clone();
+      const mat = unlit ? new THREE.MeshBasicMaterial({ vertexColors: !!geo.getAttribute('color'), ...matOpts }) : new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, vertexColors: !!geo.getAttribute('color'), ...matOpts });
+      const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = s.shadows; mesh.receiveShadow = s.shadows; mesh.name = 'ProtoSpace frame';
+      M.scene.add(mesh); M.mesh = mesh; tris = (geo.index ? geo.index.count : geo.attributes.position.count) / 3; M.mesh.userData.style = 'mesh';
+    } else if (C.cells.length) {
       if (s.style === 'cubes') {
         const mesh = buildCubes(C);
         mesh.material = unlit ? new THREE.MeshBasicMaterial(matOpts) : new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, ...matOpts });
@@ -598,6 +603,7 @@ export function createViewer(root, opts = {}) {
     const hit = ray.intersectObject(M.mesh, false)[0];
     const info = V('info');
     if (!hit) { info.textContent = 'Click a cube for its reading.'; return; }
+    if (M.mesh.userData.style === 'mesh') { info.textContent = ''; return; }
     const cubes = M.mesh.userData.style === 'cubes';
     const ci = cubes ? M.mesh.userData.cubeCell[hit.instanceId] : M.mesh.geometry.userData.faceCell[hit.faceIndex];
     const k = M.cells.cells[ci], v = M.source.vox;
@@ -617,7 +623,7 @@ export function createViewer(root, opts = {}) {
     r.domElement.toBlob(b => { download(b, baseName() + '.png'); r.setPixelRatio(dpr); r.setSize(w, h, false); if (helper) helper.visible = wasHelper; }, 'image/png');
   }
   function exportMesh() {
-    const geo = buildFused(M.cells, true);
+    const geo = M.source && M.source.mesh ? M.source.mesh.clone() : buildFused(M.cells, true);
     const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }));
     mesh.name = 'ProtoSpace frame'; return mesh;
   }
