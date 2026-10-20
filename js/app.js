@@ -1,13 +1,15 @@
-/* ProtoSpace Analyzer — the page: three tabs.
+/* ProtoSpace Analyzer — the page: five tabs.
    Generator  the Blender voxel animation live in the browser (js/generator.js)
    Analyze    pick an animation and a frame → the twelve ratings, in plain words, with the drawing behind them
    3D model   the same frame as a model you can orbit, crop with a movable box, cut and export (js/viewer.js)
+   Explorer   a design space map of uploaded solids and bays, with in-betweens (js/explorer.js)
    The ratings come from js/analyzer.js + js/rubric.js (classic scripts), read from the generated cube lattice. */
 
 import { PSGen } from './generator.js';
 import { createViewer } from './viewer.js';
 import { bayBoxes, measureBay, programScores, highlightCells, signature, pickDistinct, HIGHLIGHTS, PROGRAMS, PROGRAM_KEYS } from './program.js';
 import { GUIDE, READING } from './guide.js';
+import { mount as mountExplorer } from './explorer.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -433,7 +435,7 @@ async function scanAnimation() {
 }
 
 // ------------------------------------------------------------------ tabs
-const TAB_OF = { generator: 'generator', analyze: 'analyze', program: 'program', model: 'model' };
+const TAB_OF = { generator: 'generator', analyze: 'analyze', program: 'program', model: 'model', explorer: 'explorer' };
 function showTab(name) {
   name = TAB_OF[name] || 'generator';
   A.tab = name;
@@ -441,7 +443,8 @@ function showTab(name) {
   $$('.topbar a[data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === name));
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
   window.scrollTo({ top: 0 });
-  if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'program') renderProgram(); }
+  if (name === 'explorer') { if (A.explorer) A.explorer.show(); }
+  else if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'program') renderProgram(); }
   window.dispatchEvent(new Event('resize'));
 }
 document.addEventListener('click', e => {
@@ -471,6 +474,11 @@ function boot() {
   $('#progScanGo').addEventListener('click', scanAnimation);
   $('#progScanStop').addEventListener('click', () => { if (A.scan) A.scan.stop = true; });
   A.model = createViewer($('#model3dViewer'), { panel: 'side', sections: ['look', 'crop', 'cut', 'export'], open: { look: true, crop: true, cut: false, export: false }, color: 'foam', emptyText: 'Pick an animation and a frame above to see its 3D model.', onBox: rateBox });
+  A.explorer = mountExplorer($('#explorerRoot'), {
+    words: WORDS,
+    rate: vox => analyzeVox(vox, vox.threshold).result.ratings,
+    frameBays: () => A.item ? bayBoxes(A.item.vox).map(b => ({ name: `${A.animId === 'current' ? 'On screen' : animName(A.animId)} · frame ${A.frame} · bay ${b.i + 1}`, frame: `${A.animId === 'current' ? 'the Generator' : animName(A.animId)}, frame ${A.frame}`, vox: A.item.vox, box: { x0: b.x0, x1: b.x1, y0: 0, y1: A.item.vox.ny, z0: 0, z1: A.item.vox.nz } })) : null,
+  });
   PSGen.mount({
     analyze: (vox, thr) => analyzeVox(vox, thr),
     onAnalyzeFrame: (settings, frame) => { A.animId = 'current'; A.frame = frame; fillPickers(); A.dirty = true; showTab('analyze'); },

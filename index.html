@@ -17,7 +17,7 @@
 <nav class="topbar" aria-label="Tabs">
   <a class="brand" href="#generator">ProtoSpace <span>Analyzer</span></a>
   <div class="links tabs" role="tablist">
-    <a href="#generator" data-tab="generator" role="tab">Generator</a><a href="#analyze" data-tab="analyze" role="tab">Analyze</a><a href="#program" data-tab="program" role="tab">Program</a><a href="#model" data-tab="model" role="tab">3D model</a>
+    <a href="#generator" data-tab="generator" role="tab">Generator</a><a href="#analyze" data-tab="analyze" role="tab">Analyze</a><a href="#program" data-tab="program" role="tab">Program</a><a href="#model" data-tab="model" role="tab">3D model</a><a href="#explorer" data-tab="explorer" role="tab">Explorer</a>
   </div>
 </nav>
 <div class="wrap" id="top">
@@ -251,6 +251,27 @@
       <div class="eyebrow" id="boxRatingsTitle">Ratings inside the box</div>
       <div id="boxRatingsList" class="gen-ratings"></div>
     </div>
+  </section>
+</div>
+
+<!-- ░░ Explorer ░░ -->
+<div class="tab" data-tab="explorer" hidden>
+  <section id="explorer" aria-label="Explorer">
+    <p class="hint prog-intro">A map of a design space. Drop closed solids — SubD exports, massing studies, printed bays — or add the bays of the frame on screen, name the criteria that matter and score each design on them. The map lays the designs out so that neighbours are alike: every design gets a home tile, and every tile in between is a new blend you can open in 3D, export, compare, trace a path through, or steer toward target scores. Nothing leaves the browser.</p>
+    <div id="explorerRoot"></div>
+    <details class="more">
+      <summary>How the map is made</summary>
+      <div class="method">
+        <div>
+          <p>Each design is turned into a cube of voxels (32³ by default) by casting a ray through every column of the cube and counting where it crosses the surface, which is why the solids have to be closed. The voxels are then read as a signed distance field: every voxel knows how far it is from the surface, negative inside. Distance fields blend cleanly, so a mix of two designs is a real in-between shape rather than a double exposure.</p>
+          <p>The map is a self-organizing map (Kohonen, 1982): a grid of tiles, each holding a design vector — the distance field plus the criteria scores. Training shows the map one sample at a time: one of your designs, or a synthetic in-between made by blending two of them at a random mix (and, if asked, mirroring or turning them). The closest tile and its neighbours move toward the sample, with a neighbourhood that shrinks as training goes on. By the end, each design has settled on a tile and the tiles around it change gradually.</p>
+        </div>
+        <div>
+          <p><strong>Explore</strong> starts with a wide neighbourhood and ends with a slightly wider one than <strong>Cluster</strong>, so the designs spread out and keep their territories apart; Cluster lets similar designs share a corner. The criteria weight sets how much the scores, next to the shape, pull designs together in the layout.</p>
+          <p><strong>Inspect</strong> opens a tile as a solid model, with OBJ and STL exports. <strong>Compare</strong> pins up to three tiles side by side. <strong>Path</strong> finds the route between two tiles along which the design changes least from step to step. <strong>Navigate</strong> brightens the tiles whose scores are close to the targets and marks the least-explored tile — the one furthest from every uploaded design — where a new design would widen the map most. The overlay <em>Change between tiles</em> brightens the tiles that differ most from their neighbours: the borders between families of designs.</p>
+        </div>
+      </div>
+    </details>
   </section>
 </div>
 

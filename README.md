@@ -10,7 +10,7 @@ settings as a .py for Blender).
 Everything runs in the browser — no build step, no server code, nothing leaves the device.
 Live at the Vercel deployment of this repository.
 
-## The four tabs
+## The five tabs
 
 - **Generator** — the animation. The *Modifiers* dropdown inside the picture holds every
   control of the Blender group with the same meaning (Pattern, Motion, Growth, Noise /
@@ -46,6 +46,18 @@ Live at the Vercel deployment of this repository.
   outside it is cut away, with the twelve ratings of what is inside the box underneath;
   section and plan cuts; colour by depth, studio render, white model, cube size, spaces or
   levels; export PNG, turntable video, OBJ, GLB or STL (the cropped part when the box is on).
+- **Explorer** — a design space map. Drop closed solids (OBJ, STL, GLB, GLTF — SubD exports,
+  massing studies, printed bays) or add the five bays of the frame on screen; each becomes an
+  N³ voxel solid (`js/voxelize.js`: parity ray casting, then a signed distance field) with
+  scores on criteria you name (set by hand, or the twelve descriptors rated automatically).
+  A self-organizing map (`js/som.worker.js`, trained off the main thread on the designs plus
+  synthetic in-betweens — blends of two designs, optionally mirrored or turned) lays them out
+  on a W × H grid so neighbours are alike: every design gets a home tile (its letter) and
+  every other tile is a new blend (a dot). *Inspect* opens a tile as a solid model with OBJ
+  and STL exports; *Compare* pins up to three side by side; *Path* traces the route between
+  two tiles along which the design changes least; *Navigate* brightens the tiles close to
+  target scores and marks the least-explored tile. Overlays: nearest design, change between
+  tiles (the U-matrix), criteria match. Explore mode spreads designs out, Cluster groups them.
 
 ## The field
 
