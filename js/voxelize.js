@@ -123,12 +123,79 @@ export function signedDistance(occ, N, R = 6) {
 }
 /* The solid of a (blended) field: inside where the field is negative — or, given a share of the cube to fill, the
    voxels with the lowest field values up to that share, so a blend of thin solids does not thin out to nothing. */
+export function isoOf(sdf, fill) {                                                // the field level the solid is cut at
+  if (fill == null) return 0;
+  const n = Math.round(Math.min(0.9, Math.max(0, fill)) * sdf.length); if (n === 0) return -Infinity;
+  const sorted = Float32Array.from(sdf).sort(); return Math.min(0.6, Math.max(sorted[n - 1], -0.0001));
+}
 export function occupancyOf(sdf, fill) {
-  const o = new Uint8Array(sdf.length);
-  let thr = 0;
-  if (fill != null) { const n = Math.round(Math.min(0.9, Math.max(0, fill)) * sdf.length); const sorted = Float32Array.from(sdf).sort(); thr = n > 0 ? Math.min(0.6, Math.max(sorted[n - 1], -0.0001)) : -Infinity; if (n === 0) return o; }
+  const o = new Uint8Array(sdf.length), thr = isoOf(sdf, fill);
+  if (thr === -Infinity) return o;
   for (let i = 0; i < sdf.length; i++) o[i] = sdf[i] <= thr ? 1 : 0;
   return o;
+}
+
+/* The signed distance field of an imported surface: near the surface, the true distance from each voxel centre to the
+   triangles (so the field, and every blend of it, contours back into the smooth surface, not into its stair-steps);
+   further out, the voxel field, which is what distance is anyway once a couple of voxels away. Same units as
+   signedDistance: voxels / R, clamped to [-1, 1], negative inside (inside by the parity fill). */
+export function meshSignedDistance(tris, fit, occ, N, R = 6) {
+  const sdf = signedDistance(occ, N, R), { min, scale, off } = fit, T = tris.length / 9;
+  const P = new Float32Array(tris.length);                                        // the triangles in lattice coordinates (voxelize's frame)
+  for (let i = 0; i < tris.length; i += 3) for (let a = 0; a < 3; a++) P[i + a] = (tris[i + a] - min[a]) * scale + off[a];
+  const cell = new Array(N * N * N), key = (x, y, z) => x + N * (y + N * z);     // triangles bucketed by the voxel cells their boxes cover
+  for (let t = 0; t < T; t++) {
+    const o = t * 9, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let v = 0; v < 9; v += 3) for (let a = 0; a < 3; a++) { const c = P[o + v + a]; if (c < lo[a]) lo[a] = c; if (c > hi[a]) hi[a] = c; }
+    const x0 = Math.max(0, Math.floor(lo[0])), x1 = Math.min(N - 1, Math.floor(hi[0])), y0 = Math.max(0, Math.floor(lo[1])), y1 = Math.min(N - 1, Math.floor(hi[1])), z0 = Math.max(0, Math.floor(lo[2])), z1 = Math.min(N - 1, Math.floor(hi[2]));
+    for (let z = z0; z <= z1; z++) for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const k = key(x, y, z); (cell[k] || (cell[k] = [])).push(t); }
+  }
+  const BAND = 2.0, FADE = 1.4, reach = 2;                                        // exact distance within BAND voxels of the voxel surface; blended out to the voxel field by BAND
+  for (let zi = 0; zi < N; zi++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = x + N * (y + N * zi), dv = Math.abs(sdf[i]) * R; if (dv > BAND) continue;
+    const px = x + 0.5, py = y + 0.5, pz = N - zi - 0.5;                            // the voxel centre, in the triangles' frame (z runs the other way)
+    const cx = Math.floor(px), cy = Math.floor(py), cz = Math.floor(pz);
+    let best = Infinity;
+    for (let dz = -reach; dz <= reach; dz++) for (let dy = -reach; dy <= reach; dy++) for (let dx = -reach; dx <= reach; dx++) {
+      const X = cx + dx, Y = cy + dy, Z = cz + dz; if (X < 0 || Y < 0 || Z < 0 || X >= N || Y >= N || Z >= N) continue;
+      const l = cell[key(X, Y, Z)]; if (!l) continue;
+      for (let j = 0; j < l.length; j++) { const d = triDist2(P, l[j] * 9, px, py, pz); if (d < best) best = d; }
+    }
+    if (best === Infinity) continue;
+    const de = Math.sqrt(best) * (occ[i] ? -1 : 1) / R, w = dv <= FADE ? 1 : 1 - (dv - FADE) / (BAND - FADE);
+    sdf[i] = Math.max(-1, Math.min(1, w * de + (1 - w) * sdf[i]));
+  }
+  return sdf;
+}
+/* Squared distance from a point to triangle (P[o..o+8]) — Ericson, Real-Time Collision Detection 5.1.5. */
+function triDist2(P, o, px, py, pz) {
+  const ax = P[o], ay = P[o + 1], az = P[o + 2], bx = P[o + 3], by = P[o + 4], bz = P[o + 5], cx = P[o + 6], cy = P[o + 7], cz = P[o + 8];
+  const abx = bx - ax, aby = by - ay, abz = bz - az, acx = cx - ax, acy = cy - ay, acz = cz - az, apx = px - ax, apy = py - ay, apz = pz - az;
+  const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
+  let qx, qy, qz;
+  if (d1 <= 0 && d2 <= 0) { qx = ax; qy = ay; qz = az; }
+  else {
+    const bpx = px - bx, bpy = py - by, bpz = pz - bz, d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
+    if (d3 >= 0 && d4 <= d3) { qx = bx; qy = by; qz = bz; }
+    else {
+      const vc = d1 * d4 - d3 * d2;
+      if (vc <= 0 && d1 >= 0 && d3 <= 0) { const v = d1 / (d1 - d3); qx = ax + v * abx; qy = ay + v * aby; qz = az + v * abz; }
+      else {
+        const cpx = px - cx, cpy = py - cy, cpz = pz - cz, d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
+        if (d6 >= 0 && d5 <= d6) { qx = cx; qy = cy; qz = cz; }
+        else {
+          const vb = d5 * d2 - d1 * d6;
+          if (vb <= 0 && d2 >= 0 && d6 <= 0) { const w = d2 / (d2 - d6); qx = ax + w * acx; qy = ay + w * acy; qz = az + w * acz; }
+          else {
+            const va = d3 * d6 - d5 * d4;
+            if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) { const w = (d4 - d3) / ((d4 - d3) + (d5 - d6)); qx = bx + w * (cx - bx); qy = by + w * (cy - by); qz = bz + w * (cz - bz); }
+            else { const den = 1 / (va + vb + vc), v = vb * den, w = vc * den; qx = ax + abx * v + acx * w; qy = ay + aby * v + acy * w; qz = az + abz * v + acz * w; }
+          }
+        }
+      }
+    }
+  }
+  return (px - qx) * (px - qx) + (py - qy) * (py - qy) + (pz - qz) * (pz - qz);
 }
 export function toVox(occ, N) {
   const sizes = new Uint8Array(occ.length); for (let i = 0; i < occ.length; i++) sizes[i] = occ[i] ? 255 : 0;

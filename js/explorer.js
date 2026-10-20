@@ -7,7 +7,8 @@
 import * as THREE from 'three';
 import { createViewer } from './viewer.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, occupancyOf, toVox } from './voxelize.js';
+import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, meshSignedDistance, occupancyOf, isoOf, toVox } from './voxelize.js';
+import { fieldGeometry } from './isosurface.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -82,10 +83,21 @@ function makeThumbs() {
     d.geo = { g, key, N: d.N };
     return g;
   }
-  const shapeOf = (occ, N, colors, design) => design && design.tris && design.fit ? meshGeometryOf(design, colors) : geometryOf(occ, N, colors || ['#f2efe9', '#d8d3cc']);
-  function place(occ, N, colors, withBase = true, design = null) {
+  /* A tile's field (or a design's) as one smooth surface, painted top to base over the solid's own height. */
+  function fieldGeometryOf(src, N, colors) {
+    const occ = src.occ; let yMin = N, yMax = 0;
+    for (let i = 0; i < occ.length; i++) if (occ[i]) { const y = ((i / N) | 0) % N; if (y < yMin) yMin = y; if (y > yMax) yMax = y; }
+    const span = Math.max(1, yMax + 1 - yMin), g = fieldGeometry(src.sdf, N, src.iso ?? 0), P = g.getAttribute('position');
+    const [top, base] = colors, top3 = new THREE.Color(top).toArray(), base3 = new THREE.Color(base).toArray(), col = new Float32Array(P.count * 3);
+    for (let i = 0; i < P.count; i++) { const t = Math.pow(clamp((P.getY(i) - yMin) / span, 0, 1), 2.4); for (let c = 0; c < 3; c++) col[i * 3 + c] = base3[c] + (top3[c] - base3[c]) * t; }
+    g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    return g;
+  }
+  /* src: a design (its imported surface, or its field) or a map tile (its field); the cube solid only as a last resort. */
+  const shapeOf = (src, N, colors) => { colors = colors || ['#f2efe9', '#d8d3cc']; return src.tris && src.fit ? meshGeometryOf(src, colors) : src.sdf ? fieldGeometryOf(src, N, colors) : geometryOf(src.occ, N, colors); };
+  function place(src, N, colors, withBase = true) {
     if (mesh) { scene.remove(mesh); if (!mesh.userData.shared) mesh.geometry.dispose(); } if (base) { scene.remove(base); base = null; }
-    mesh = new THREE.Mesh(shapeOf(occ, N, colors, design), mat); mesh.userData.shared = !!(design && design.tris); mesh.castShadow = mesh.receiveShadow = withBase; scene.add(mesh);
+    mesh = new THREE.Mesh(shapeOf(src, N, colors), mat); mesh.userData.shared = !!(src.tris && src.fit); mesh.castShadow = mesh.receiveShadow = withBase; scene.add(mesh);
     if (withBase) { base = new THREE.Mesh(new THREE.BoxGeometry(N + 4, 0.5, N + 4), baseMat); base.position.set(N / 2, 0.75, -N / 2); base.receiveShadow = true; scene.add(base); }
     const ctr = new THREE.Vector3(N / 2, N * 0.38, -N / 2);
     sun.position.copy(ctr).add(new THREE.Vector3(-0.55, 1, 0.75).multiplyScalar(N * 1.6)); sun.target.position.copy(ctr);
@@ -100,7 +112,7 @@ function makeThumbs() {
     renderer.render(scene, camera);
     return renderer.domElement.toDataURL('image/png');
   }
-  function render(occ, N, colors, design) { const ctr = place(occ, N, colors, false, design); return shoot(ctr, N, 0, S); }
+  function render(src, N, colors) { const ctr = place(src, N, colors, false); return shoot(ctr, N, 0, S); }
   /* Live turning previews: every registered canvas is redrawn each frame from its own mesh, turned by the clock, with
      one shared renderer — smooth, and one WebGL context however many previews are on the page. */
   const live = new Map(); let raf = null, t0 = performance.now();
@@ -133,17 +145,17 @@ function makeThumbs() {
     }
     if (live.size) raf = requestAnimationFrame(tick);
   }
-  function spin(canvas, occ, N, colors, design) {                                // (re)register a canvas to show this solid turning
+  function spin(canvas, src, N, colors) {                                        // (re)register a canvas to show this solid turning
     const old = live.get(canvas); if (old && !old.shared) old.mesh.geometry.dispose();
-    live.set(canvas, { mesh: new THREE.Mesh(shapeOf(occ, N, colors, design), mat), N, shared: !!(design && design.tris) });
+    live.set(canvas, { mesh: new THREE.Mesh(shapeOf(src, N, colors), mat), N, shared: !!(src.tris && src.fit) });
     if (!raf) raf = requestAnimationFrame(tick);
   }
-  return { render, spin, meshOf: meshGeometryOf };
+  return { render, spin, shapeOf };
 }
 
 // ------------------------------------------------------------------ designs
 function addDesign(name, occ, N, extra = {}) {
-  const sdf = signedDistance(occ, N);
+  const sdf = extra.tris && extra.fit ? meshSignedDistance(extra.tris, extra.fit, occ, N) : signedDistance(occ, N);
   const d = { id: Math.random().toString(36).slice(2, 8), name, occ, N, sdf, crit: E.criteria.map(() => 0.5), ...extra };
   d.letter = LETTERS[E.designs.length % LETTERS.length]; d.colors = colorsOf(E.designs.length); d.color = d.colors[0];
   E.designs.push(d);
@@ -172,7 +184,7 @@ function autoRate(d) {
   E.criteria.forEach((c, i) => { if (r[c] != null) d.crit[i] = clamp(r[c] / 100, 0, 1); });
 }
 function removeDesign(id) { E.designs = E.designs.filter(d => d.id !== id); E.designs.forEach((d, i) => { d.letter = LETTERS[i % LETTERS.length]; }); E.map = null; renderAll(); }
-function spinDesign(d) { const c = R.designs && R.designs.querySelector(`[data-spin="${d.id}"]`); if (!c) return; if (!E.thumbs) E.thumbs = makeThumbs(); E.thumbs.spin(c, d.occ, d.N, d.colors, d); }
+function spinDesign(d) { const c = R.designs && R.designs.querySelector(`[data-spin="${d.id}"]`); if (!c) return; if (!E.thumbs) E.thumbs = makeThumbs(); E.thumbs.spin(c, d, d.N, d.colors); }
 /* The design whose home tile this is (its own imported surface is drawn there), or null for a generated blend. */
 function ownerOf(n) { const m = E.map; if (!m || !m.bmu) return null; const i = m.bmu.indexOf(n.k); return i >= 0 ? E.designs[i] : null; }
 /* The colours of a tile: every design pulls on it, the near ones much more (inverse distance), so a home tile shows
@@ -215,8 +227,8 @@ function train() {
       const nodes = [];
       for (let k = 0; k < K; k++) {
         const D = V + E.criteria.length + 1, o = k * D, sdf = m.weights.subarray(o, o + V), crit = Array.from(m.weights.subarray(o + V, o + V + E.criteria.length)), fill = m.weights[o + V + E.criteria.length];
-        const occ = occupancyOf(sdf, fill); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
-        nodes.push({ k, x: k % E.W, y: (k / E.W) | 0, sdf, occ, crit, filled, nearest: m.nearest[k], nearDist: m.nearDist[k], thumb: null });
+        const iso = isoOf(sdf, fill), occ = occupancyOf(sdf, fill); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
+        nodes.push({ k, x: k % E.W, y: (k / E.W) | 0, sdf, iso, occ, N, crit, filled, nearest: m.nearest[k], nearDist: m.nearDist[k], thumb: null });
       }
       E.map = { nodes, weights: m.weights, bmu: m.bmu, bmuD: m.bmuD, dists: m.dists, W: E.W, H: E.H, N, criteria: E.criteria.slice(), umax: 0, nearMax: Math.max(1e-9, ...nodes.map(n => n.nearDist)) };
       nodes.forEach(n => { n.colors = tileColors(n); });
@@ -336,7 +348,7 @@ function renderThumbs() {                                                       
     if (E.map !== m) return;
     const t0 = performance.now();
     while (todo.length && performance.now() - t0 < 24) {
-      const n = todo.shift(); n.thumb = E.thumbs.render(n.occ, m.N, n.colors, ownerOf(n));
+      const n = todo.shift(); n.thumb = E.thumbs.render(ownerOf(n) || n, m.N, n.colors);
       const el = R.grid.querySelector(`[data-k="${n.k}"]`); if (el && !el.querySelector('img')) el.insertAdjacentHTML('afterbegin', `<img src="${n.thumb}" alt="">`);
     }
     if (todo.length) requestAnimationFrame(step); else renderStrip();
@@ -359,11 +371,11 @@ function renderDetail() {
   if (!E.thumbs) E.thumbs = makeThumbs();
   const mix = m.dists ? tileMix(n).slice(0, 4).filter(([, w]) => w > 0.04) : [];
   R.detailCrit.innerHTML = `<div class="xp-mixrow"><canvas class="xp-spin big" data-spin="tile" width="180" height="180" title="This tile, turning"></canvas><div class="xp-mix"><span class="eyebrow">Made of</span>${mix.map(([i, w]) => { const d = E.designs[i]; return `<div class="xp-bar"><span><i class="xp-sw" style="--a:${d.colors[0]};--b:${d.colors[1]}"></i>${esc(d.name)}</span><span class="track"><span class="bar" style="width:${Math.round(w * 100)}%;background:${d.colors[0]}"></span></span><span class="num">${Math.round(w * 100)}%</span></div>`; }).join('')}</div></div>` + (E.criteria.length ? critBars(n.crit, E.tool === 'navigate') : '');
-  E.thumbs.spin(R.detailCrit.querySelector('[data-spin="tile"]'), n.occ, m.N, n.colors, owners[0]);
+  E.thumbs.spin(R.detailCrit.querySelector('[data-spin="tile"]'), owners[0] || n, m.N, n.colors);
   R.pin.textContent = E.pins.includes(n.k) ? 'Unpin' : 'Pin';
   if (!E.viewer) E.viewer = createViewer(R.viewer, { panel: 'none', overlay: true, sections: [], boxDrag: false, showBox: false, base: false, view: 'iso', color: 'foam', style: 'blocks', ratio: 0.72, emptyText: 'Pick a tile.' });
-  const own = owners[0] && owners[0].tris && owners[0].fit ? owners[0] : null;
-  E.viewer.setSource({ name: own ? own.name : `explorer tile ${n.x}-${n.y}`, vox: toVox(n.occ, m.N), mesh: own ? E.thumbs.meshOf(own, ['#f2efe9', '#d8d3cc']) : null }, null);
+  const own = owners[0] || null;
+  E.viewer.setSource({ name: own ? own.name : `explorer tile ${n.x}-${n.y}`, vox: toVox(n.occ, m.N), mesh: E.thumbs.shapeOf(own || n, m.N, ['#f2efe9', '#d8d3cc']) }, null);
 }
 function renderStrip() {                                                         // Compare and Path: the pinned tiles or the path, side by side
   const m = E.map, el = R.strip; if (!m) { el.hidden = true; return; }
@@ -372,7 +384,7 @@ function renderStrip() {                                                        
   if (!ks.length) return;
   el.innerHTML = ks.map((k, i) => { const n = m.nodes[k]; return `<button type="button" class="xp-card${k === E.sel ? ' on' : ''}" data-k="${k}">
       <canvas class="xp-spin card" data-spin="k${k}" width="360" height="360"></canvas><div class="t"><em>${E.tool === 'path' ? i + 1 : ''}</em> Tile (${n.x}, ${n.y})</div><div class="hint">${esc(nodeName(n))}</div>${E.criteria.length ? critBars(n.crit) : ''}</button>`; }).join('');
-  ks.forEach(k => { const n = m.nodes[k]; E.thumbs.spin(el.querySelector(`[data-spin="k${k}"]`), n.occ, m.N, n.colors, ownerOf(n)); });
+  ks.forEach(k => { const n = m.nodes[k]; E.thumbs.spin(el.querySelector(`[data-spin="k${k}"]`), ownerOf(n) || n, m.N, n.colors); });
   if (E.tool === 'path' && E.path.cells) R.pathNote.textContent = `${E.path.cells.length} tiles · the design changes as little as possible from one step to the next.`;
 }
 function renderTools() {
@@ -410,7 +422,7 @@ function reVoxelize(N) {                                                        
   for (const d of E.designs) {
     const v = d.tris ? voxelize(d.tris, N) : occFromVox(d.vox, d.box, N);
     if (d.tris) { d.fit = v.fit; d.geo = null; }
-    d.occ = v.occ; d.filled = v.filled; d.N = N; d.sdf = signedDistance(v.occ, N);
+    d.occ = v.occ; d.filled = v.filled; d.N = N; d.sdf = d.tris ? meshSignedDistance(d.tris, d.fit, v.occ, N) : signedDistance(v.occ, N);
   }
   E.N = N; renderAll();
 }
@@ -420,7 +432,7 @@ const HTML = `
 <div class="xp">
   <aside class="xp-controls" aria-label="Controls">
     <h2 class="eyebrow">Designs</h2>
-    <label class="xp-drop" data-v="drop"><input type="file" multiple accept=".obj,.stl,.glb,.gltf" hidden><b>Drop closed solids</b><span>OBJ · STL · GLB · GLTF → <output data-v="N">32</output>³ voxels</span><span class="hint" data-v="dropMsg"></span></label>
+    <label class="xp-drop" data-v="drop"><input type="file" multiple accept=".obj,.stl,.glb,.gltf" hidden><b>Drop closed solids</b><span>OBJ · STL · GLB · GLTF</span><span class="hint" data-v="dropMsg"></span></label>
     <div class="xp-row"><span class="lbl">Add the Voronoi spaces</span><button type="button" class="btn quiet" data-cat="lobby" title="01–05: the five best lobbies of the Voronoi animations, as SubD solids">Lobbies</button><button type="button" class="btn quiet" data-cat="office" title="06–10: the five best workspaces">Workspaces</button><button type="button" class="btn quiet" data-cat="social" title="11–15: the five best gathering spaces">Gathering</button><button type="button" class="btn quiet" data-cat="all" data-v="addSpaces">All fifteen</button></div>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="addBays" title="The five bays of the frame open in Analyze / Program / 3D model, each as a design">Add the bays of the frame on screen</button><button type="button" class="btn quiet" data-v="clear" title="Remove every design">Clear</button><span class="hint" data-v="count"></span></div>
     <div data-v="designs" class="xp-designs"></div>
@@ -435,7 +447,6 @@ const HTML = `
       <label>Width <input type="number" min="2" max="12" step="1" value="5" data-v="W"></label>
       <label>Height <input type="number" min="2" max="12" step="1" value="5" data-v="H"></label>
       <label>Mode <select data-v="mode"><option value="explore">Explore</option><option value="cluster">Cluster</option></select></label>
-      <label>Resolution <select data-v="res"><option value="24">24³</option><option value="32" selected>32³</option><option value="40">40³</option><option value="48">48³</option></select></label>
     </div>
     <p class="hint" data-v="modeHint">Explore spreads the designs across the map and keeps their territories apart — coverage, when the designs differ. Cluster lets similar designs share a corner — grouping, when there are many.</p>
     <label class="xp-slider">Iterations · <output data-v="itersOut">1600</output><input type="range" min="200" max="6000" step="100" value="1600" data-v="iters"></label>
@@ -530,7 +541,6 @@ export function mount(root, hooks = {}) {
   R.W.addEventListener('change', () => { E.W = clamp(+R.W.value || 5, 2, 12); R.W.value = E.W; E.map = null; renderMap(); });
   R.H.addEventListener('change', () => { E.H = clamp(+R.H.value || 5, 2, 12); R.H.value = E.H; E.map = null; renderMap(); });
   R.mode.addEventListener('change', () => { E.mode = R.mode.value; });
-  R.res.addEventListener('change', () => { R.N.textContent = R.res.value; reVoxelize(+R.res.value); });
   R.iters.addEventListener('input', () => { E.iters = +R.iters.value; R.itersOut.textContent = E.iters; });
   R.synth.addEventListener('input', () => { E.synth = +R.synth.value; R.synthOut.textContent = E.synth; });
   R.symmetry.addEventListener('change', () => { E.symmetry = R.symmetry.checked; });
