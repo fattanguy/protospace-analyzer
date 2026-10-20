@@ -7,8 +7,8 @@
 import * as THREE from 'three';
 import { createViewer } from './viewer.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, meshSignedDistance, occupancyOf, isoOf, toVox } from './voxelize.js';
-import { fieldGeometry } from './isosurface.js';
+import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, meshSignedDistance, occupancyOf, isoOf, tidy, blocky, toVox } from './voxelize.js';
+import { blockGeometry } from './isosurface.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -83,11 +83,11 @@ function makeThumbs() {
     d.geo = { g, key, N: d.N };
     return g;
   }
-  /* A tile's field (or a design's) as one smooth surface, painted top to base over the solid's own height. */
+  /* A tile's solid (or a design's without its mesh) as a SubD-like surface — square edges kept — painted top to base over its own height. */
   function fieldGeometryOf(src, N, colors) {
     const occ = src.occ; let yMin = N, yMax = 0;
     for (let i = 0; i < occ.length; i++) if (occ[i]) { const y = ((i / N) | 0) % N; if (y < yMin) yMin = y; if (y > yMax) yMax = y; }
-    const span = Math.max(1, yMax + 1 - yMin), g = fieldGeometry(src.sdf, N, src.iso ?? 0), P = g.getAttribute('position');
+    const span = Math.max(1, yMax + 1 - yMin), g = blockGeometry(occ, N), P = g.getAttribute('position');
     const [top, base] = colors, top3 = new THREE.Color(top).toArray(), base3 = new THREE.Color(base).toArray(), col = new Float32Array(P.count * 3);
     for (let i = 0; i < P.count; i++) { const t = Math.pow(clamp((P.getY(i) - yMin) / span, 0, 1), 2.4); for (let c = 0; c < 3; c++) col[i * 3 + c] = base3[c] + (top3[c] - base3[c]) * t; }
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -227,7 +227,7 @@ function train() {
       const nodes = [];
       for (let k = 0; k < K; k++) {
         const D = V + E.criteria.length + 1, o = k * D, sdf = m.weights.subarray(o, o + V), crit = Array.from(m.weights.subarray(o + V, o + V + E.criteria.length)), fill = m.weights[o + V + E.criteria.length];
-        const iso = isoOf(sdf, fill), occ = occupancyOf(sdf, fill); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
+        const iso = isoOf(sdf, fill), occ = blocky(occupancyOf(sdf, fill), N, 3); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
         nodes.push({ k, x: k % E.W, y: (k / E.W) | 0, sdf, iso, occ, N, crit, filled, nearest: m.nearest[k], nearDist: m.nearDist[k], thumb: null });
       }
       E.map = { nodes, weights: m.weights, bmu: m.bmu, bmuD: m.bmuD, dists: m.dists, W: E.W, H: E.H, N, criteria: E.criteria.slice(), umax: 0, nearMax: Math.max(1e-9, ...nodes.map(n => n.nearDist)) };

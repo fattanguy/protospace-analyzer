@@ -197,6 +197,33 @@ function triDist2(P, o, px, py, pz) {
   }
   return (px - qx) * (px - qx) + (py - qy) * (py - qy) + (pz - qz) * (pz - qz);
 }
+/* The 3 × 3 × 3 majority of a voxel solid: ragged single voxels and pin-holes go, flat faces and square corners stay
+   (a median filter keeps edges). The map's blends are tidied this way, so they read as blocks like the designs. */
+export function tidy(occ, N, passes = 1) {
+  let a = occ;
+  for (let p = 0; p < passes; p++) {
+    const b = new Uint8Array(a.length);
+    for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      let n = 0;
+      for (let dz = -1; dz <= 1; dz++) { const Z = z + dz; if (Z < 0 || Z >= N) continue; for (let dy = -1; dy <= 1; dy++) { const Y = y + dy; if (Y < 0 || Y >= N) continue; for (let dx = -1; dx <= 1; dx++) { const X = x + dx; if (X < 0 || X >= N) continue; n += a[X + N * (Y + N * Z)]; } } }
+      b[x + N * (y + N * z)] = n >= 14 ? 1 : 0;
+    }
+    a = b;
+  }
+  return a;
+}
+/* The solid snapped to a grid of B-voxel blocks: a block is filled when at least half its voxels are — the map's
+   blends become block-built, with flat faces and square corners, the way the designs are built of cubes. */
+export function blocky(occ, N, B = 2) {
+  const o = new Uint8Array(occ.length), half = (B * B * B) / 2;
+  for (let z = 0; z < N; z += B) for (let y = 0; y < N; y += B) for (let x = 0; x < N; x += B) {
+    let n = 0;
+    for (let dz = 0; dz < B && z + dz < N; dz++) for (let dy = 0; dy < B && y + dy < N; dy++) for (let dx = 0; dx < B && x + dx < N; dx++) n += occ[(x + dx) + N * ((y + dy) + N * (z + dz))];
+    if (n < half) continue;
+    for (let dz = 0; dz < B && z + dz < N; dz++) for (let dy = 0; dy < B && y + dy < N; dy++) for (let dx = 0; dx < B && x + dx < N; dx++) o[(x + dx) + N * ((y + dy) + N * (z + dz))] = 1;
+  }
+  return o;
+}
 export function toVox(occ, N) {
   const sizes = new Uint8Array(occ.length); for (let i = 0; i < occ.length; i++) sizes[i] = occ[i] ? 255 : 0;
   return { nx: N, ny: N, nz: N, sizes, max: 255, threshold: 128 };
