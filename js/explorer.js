@@ -310,7 +310,8 @@ const HTML = `
   <aside class="xp-controls" aria-label="Controls">
     <h2 class="eyebrow">Designs</h2>
     <label class="xp-drop" data-v="drop"><input type="file" multiple accept=".obj,.stl,.glb,.gltf" hidden><b>Drop closed solids</b><span>OBJ · STL · GLB · GLTF → <output data-v="N">32</output>³ voxels</span><span class="hint" data-v="dropMsg"></span></label>
-    <div class="xp-row"><button type="button" class="btn quiet" data-v="addSpaces" title="The fifteen lobbies, workspaces and social areas picked from the loops, as the smooth solids they were printed from">Add the fifteen printed spaces</button><button type="button" class="btn quiet" data-v="addBays" title="The five bays of the frame open in Analyze / Program / 3D model, each as a design">Add the bays of the frame on screen</button><span class="hint" data-v="count"></span></div>
+    <div class="xp-row"><span class="lbl">Add the printed spaces</span><button type="button" class="btn quiet" data-cat="lobby" title="01–05, as the smooth solids they were printed from">Lobbies</button><button type="button" class="btn quiet" data-cat="office" title="06–10">Workspaces</button><button type="button" class="btn quiet" data-cat="social" title="11–15">Social areas</button><button type="button" class="btn quiet" data-cat="all" data-v="addSpaces">All fifteen</button></div>
+    <div class="xp-row"><button type="button" class="btn quiet" data-v="addBays" title="The five bays of the frame open in Analyze / Program / 3D model, each as a design">Add the bays of the frame on screen</button><button type="button" class="btn quiet" data-v="clear" title="Remove every design">Clear</button><span class="hint" data-v="count"></span></div>
     <div data-v="designs" class="xp-designs"></div>
 
     <div class="xp-sect"><h2 class="eyebrow">Criteria</h2><div class="xp-row"><button type="button" class="btn quiet" data-v="addCrit">Add criterion</button><button type="button" class="btn quiet" data-v="addWords" title="The twelve descriptors of the project as criteria">The twelve descriptors</button></div></div>
@@ -350,7 +351,7 @@ const HTML = `
     <div class="xp-map"><div class="xp-tiles" data-v="grid" role="grid"></div></div>
     <div class="xp-tools">
       <div class="seg" role="group" aria-label="Tool"><button type="button" data-tool="inspect" class="on">Inspect</button><button type="button" data-tool="compare">Compare</button><button type="button" data-tool="path">Path</button><button type="button" data-tool="navigate">Navigate</button></div>
-      <label class="xp-overlay">Overlay <select data-v="overlay"><option value="none">None</option><option value="mix">Nearest design</option><option value="distance">Change between tiles</option><option value="match">Criteria match</option></select></label>
+      <div class="xp-row"><label class="xp-overlay">Overlay <select data-v="overlay"><option value="none">None</option><option value="mix">Nearest design</option><option value="distance">Change between tiles</option><option value="match">Criteria match</option></select></label><button type="button" class="btn quiet" data-v="png" title="The map as one picture: every tile with its letter, the legend underneath">Picture · PNG</button></div>
     </div>
     <div class="xp-targets" data-v="targets" hidden></div>
     <div class="xp-navigate" data-v="navigate" hidden><p class="hint" data-v="least"></p></div>
@@ -380,10 +381,13 @@ export function mount(root, hooks = {}) {
     bays.forEach(b => designFromVox(b.name, b.vox, b.box)); E.map = null; renderAll();
     R.dropMsg.textContent = `${bays.length} bays added from ${bays[0].frame}.`;
   });
-  R.addSpaces.addEventListener('click', async () => {
-    R.addSpaces.disabled = true;
+  R.clear.addEventListener('click', () => { E.designs = []; E.map = null; E.sel = null; E.pins = []; E.path = { a: null, b: null, cells: null }; R.dropMsg.textContent = ''; renderAll(); });
+  R.png.addEventListener('click', mapPicture);
+  const CAT = { lobby: id => +id <= 5, office: id => +id >= 6 && +id <= 10, social: id => +id >= 11, all: () => true };
+  $$('[data-cat]', root).forEach(btn => btn.addEventListener('click', async () => {
+    const cat = btn.dataset.cat; btn.disabled = true;
     try {
-      const list = await (await fetch('assets/spaces/index.json')).json();
+      const list = (await (await fetch('assets/spaces/index.json')).json()).filter(it => CAT[cat](it.id));
       for (const it of list) {
         if (E.designs.some(d => d.space === it.id)) continue;
         R.dropMsg.textContent = `Reading ${it.id} ${it.name}…`;
@@ -391,10 +395,10 @@ export function mount(root, hooks = {}) {
         addDesign(`${it.id} ${it.name}`, v.occ, E.N, { filled: v.filled, triangles: v.triangles, source: 'space', space: it.id, tris, note: `${it.anim} · frame ${it.frame} · bays ${it.bay}–${it.bay + 2} · ${it.rating}` });
         E.map = null; renderDesigns();
       }
-      R.dropMsg.textContent = `${list.length} spaces: the fifteen from the boards, smoothed the way they were printed.`;
+      R.dropMsg.textContent = `${list.length} spaces added: from the boards, smoothed the way they were printed.`;
     } catch (err) { R.dropMsg.textContent = 'The spaces could not be loaded: ' + (err.message || err); }
-    R.addSpaces.disabled = false; renderAll();
-  });
+    btn.disabled = false; renderAll();
+  }));
   R.designs.addEventListener('click', e => { const b = e.target.closest('[data-remove]'); if (b) removeDesign(b.dataset.remove); });
   R.designs.addEventListener('input', e => { const s = e.target.closest('[data-score]'); if (!s) return; const [id, i] = s.dataset.score.split(':'); const d = E.designs.find(d => d.id === id); if (d) { d.crit[+i] = +s.value; s.nextElementSibling.textContent = (+s.value).toFixed(2); E.map = null; } });
   // criteria
@@ -435,6 +439,30 @@ export function mount(root, hooks = {}) {
   R.navigate.hidden = true;
   renderAll();
   return { show() { if (E.viewer) E.viewer.resize(); } };
+}
+/* The map as one picture: the tiles with their letters, the legend underneath. */
+function mapPicture() {
+  const m = E.map; if (!m) return;
+  const T = 216, G = 6, P = 24, rows = Math.ceil(E.designs.length / 2), LEG = 26 * rows + 44, W = P * 2 + m.W * (T + G) - G, H = P * 2 + m.H * (T + G) - G + LEG;
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  const home = new Map(); m.bmu.forEach((k, i) => { (home.get(k) || home.set(k, []).get(k)).push(E.designs[i]); });
+  Promise.all(m.nodes.map(n => new Promise(res => { if (!n.thumb) return res(null); const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = n.thumb; }))).then(ims => {
+    m.nodes.forEach((n, i) => {
+      const x = P + n.x * (T + G), y = P + n.y * (T + G);
+      g.fillStyle = '#0a0a0a'; g.fillRect(x, y, T, T); if (ims[i]) g.drawImage(ims[i], x, y, T, T);
+      g.strokeStyle = '#3a3a3a'; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, T - 1, T - 1);
+      const owners = home.get(n.k);
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      if (owners) owners.forEach((d, j) => { g.fillStyle = d.color; g.fillRect(x + 8 + j * 24, y + 8, 20, 20); g.fillStyle = '#111'; g.font = '700 11px Poppins, Arial, sans-serif'; g.fillText(d.letter, x + 18 + j * 24, y + 18); });
+      else { g.fillStyle = '#7d7d7d'; g.beginPath(); g.arc(x + 15, y + 15, 3, 0, Math.PI * 2); g.fill(); }
+    });
+    const y0 = P + m.H * (T + G) - G + 24, colW = (W - 2 * P) / 2;
+    g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillStyle = '#7d7d7d'; g.font = '500 11px Poppins, Arial, sans-serif';
+    g.fillText(`${m.W}×${m.H} MAP · ${E.designs.length} DESIGNS · LETTER = A DESIGN'S HOME TILE · DOT = GENERATED BLEND`, P, y0);
+    E.designs.forEach((d, i) => { const x = P + (i % 2) * colW, y = y0 + 28 + Math.floor(i / 2) * 26; g.fillStyle = d.color; g.fillRect(x, y - 9, 18, 18); g.textAlign = 'center'; g.fillStyle = '#111'; g.font = '700 10px Poppins, Arial, sans-serif'; g.fillText(d.letter, x + 9, y); g.textAlign = 'left'; g.fillStyle = '#e8e8e8'; g.font = '400 13px Poppins, Arial, sans-serif'; g.fillText(d.name, x + 26, y); });
+    c.toBlob(b => { const u = URL.createObjectURL(b), a = document.createElement('a'); a.href = u; a.download = `ProtoSpace-explorer-map-${m.W}x${m.H}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }, 'image/png');
+  });
 }
 function togglePin(k) { if (k == null) return; const i = E.pins.indexOf(k); if (i >= 0) E.pins.splice(i, 1); else { if (E.pins.length >= 3) E.pins.shift(); E.pins.push(k); } renderMap(); renderStrip(); renderDetail(); }
 function tileName() { const n = E.map && E.map.nodes[E.sel]; return n ? `ProtoSpace-explorer-tile-${n.x}-${n.y}-${E.map.N}vox` : 'ProtoSpace-explorer-tile'; }

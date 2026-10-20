@@ -6,7 +6,8 @@
 "frame": 231,
 "anim": "Voronoi",
 "bay": 4,
-"rating": "Interlocking 100/100"
+"rating": "Interlocking 100/100",
+"cat": "lobby"
 },
 {
 "id": "02",
@@ -15,7 +16,8 @@
 "frame": 93,
 "anim": "Noise",
 "bay": 7,
-"rating": "Decentralized 100/100"
+"rating": "Decentralized 100/100",
+"cat": "lobby"
 },
 {
 "id": "03",
@@ -24,7 +26,8 @@
 "frame": 60,
 "anim": "Voronoi",
 "bay": 6,
-"rating": "Networked 100/100"
+"rating": "Networked 100/100",
+"cat": "lobby"
 },
 {
 "id": "04",
@@ -33,7 +36,8 @@
 "frame": 75,
 "anim": "Voronoi",
 "bay": 4,
-"rating": "Intimate 100/100"
+"rating": "Intimate 100/100",
+"cat": "lobby"
 },
 {
 "id": "05",
@@ -42,7 +46,8 @@
 "frame": 115,
 "anim": "Voronoi",
 "bay": 4,
-"rating": "Intimate 100/100"
+"rating": "Intimate 100/100",
+"cat": "lobby"
 },
 {
 "id": "06",
@@ -51,7 +56,8 @@
 "frame": 101,
 "anim": "Noise",
 "bay": 7,
-"rating": "Porous 100/100"
+"rating": "Porous 100/100",
+"cat": "office"
 },
 {
 "id": "07",
@@ -60,7 +66,8 @@
 "frame": 41,
 "anim": "Voronoi",
 "bay": 4,
-"rating": "Layered 99/100"
+"rating": "Layered 99/100",
+"cat": "office"
 },
 {
 "id": "08",
@@ -69,7 +76,8 @@
 "frame": 143,
 "anim": "Voronoi",
 "bay": 6,
-"rating": "Visually Connected 100/100"
+"rating": "Visually Connected 100/100",
+"cat": "office"
 },
 {
 "id": "09",
@@ -78,7 +86,8 @@
 "frame": 181,
 "anim": "Voronoi",
 "bay": 8,
-"rating": "Socially Interactive 100/100"
+"rating": "Socially Interactive 100/100",
+"cat": "office"
 },
 {
 "id": "10",
@@ -87,7 +96,8 @@
 "frame": 26,
 "anim": "Voronoi",
 "bay": 7,
-"rating": "Village-Like 100/100"
+"rating": "Village-Like 100/100",
+"cat": "office"
 },
 {
 "id": "11",
@@ -96,7 +106,8 @@
 "frame": 66,
 "anim": "Voronoi",
 "bay": 8,
-"rating": "Modular 100/100"
+"rating": "Modular 100/100",
+"cat": "gathering"
 },
 {
 "id": "12",
@@ -105,7 +116,8 @@
 "frame": 11,
 "anim": "Noise",
 "bay": 6,
-"rating": "Fragmented 100/100"
+"rating": "Fragmented 100/100",
+"cat": "gathering"
 },
 {
 "id": "13",
@@ -114,7 +126,8 @@
 "frame": 198,
 "anim": "Voronoi",
 "bay": 5,
-"rating": "Porous 89/100"
+"rating": "Porous 89/100",
+"cat": "gathering"
 },
 {
 "id": "14",
@@ -123,7 +136,8 @@
 "frame": 240,
 "anim": "Noise",
 "bay": 8,
-"rating": "Clustered 100/100"
+"rating": "Clustered 100/100",
+"cat": "gathering"
 },
 {
 "id": "15",
@@ -132,6 +146,7 @@
 "frame": 181,
 "anim": "Noise",
 "bay": 4,
-"rating": "Networked 100/100"
+"rating": "Networked 100/100",
+"cat": "gathering"
 }
 ]
