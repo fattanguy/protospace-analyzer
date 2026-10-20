@@ -15,7 +15,7 @@ const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 const HUES = [20, 196, 42, 262, 150, 330, 212, 72, 300, 100, 240, 0, 176, 48, 285];
 const hsl = (h, s, l) => { s /= 100; l /= 100; const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return '#' + [f(0), f(8), f(4)].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''); };
 /* Each design gets two colours, top and base; its solid is painted top to bottom with them, and a blend of designs is painted with the blend of their colours. */
-const colorsOf = i => { const h = HUES[i % HUES.length]; return [hsl(h, 72, 63), hsl(h, 60, 5)]; };    // top: the design's own light colour; base: the same hue, almost black
+const colorsOf = i => { const h = HUES[i % HUES.length]; return [hsl(h, 88, 56), '#000000']; };    // top: the design's own vivid colour; base: black
 const colorOf = i => colorsOf(i)[0];
 const rgbOf = hex => [1, 3, 5].map(o => parseInt(hex.slice(o, o + 2), 16) / 255);
 const hexOf = rgb => '#' + rgb.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
@@ -33,8 +33,8 @@ function makeThumbs() {
   const S = 216, renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(1); renderer.setSize(S, S); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene();
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x2a2a2a, 0.8); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 1.9); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.08; scene.add(sun); scene.add(sun.target);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x2a2a2a, 1.4); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.08; scene.add(sun); scene.add(sun.target);
   const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(60, 20, -40); scene.add(fill);
   const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 2000);
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
@@ -48,7 +48,7 @@ function makeThumbs() {
     let yMin = N, yMax = 0;                                                       // the fade runs over the solid's own height
     for (let i = 0; i < occ.length; i++) if (occ[i]) { const y = ((i / N) | 0) % N; if (y < yMin) yMin = y; if (y > yMax) yMax = y; }
     const span = Math.max(1, yMax + 1 - yMin);
-    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); const t = Math.pow(clamp((p[1] - yMin) / span, 0, 1), 2.1); col.push(base3[0] + (top3[0] - base3[0]) * t, base3[1] + (top3[1] - base3[1]) * t, base3[2] + (top3[2] - base3[2]) * t); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
+    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); const t = Math.pow(clamp((p[1] - yMin) / span, 0, 1), 2.4); col.push(base3[0] + (top3[0] - base3[0]) * t, base3[1] + (top3[1] - base3[1]) * t, base3[2] + (top3[2] - base3[2]) * t); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
     for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       if (!occ[x + N * (y + N * z)]) continue;
       const x0 = x, x1 = x + 1, y0 = y, y1 = y + 1, z0 = z, z1 = z + 1;
@@ -85,7 +85,7 @@ function makeThumbs() {
      one shared renderer — smooth, and one WebGL context however many previews are on the page. */
   const live = new Map(); let raf = null, t0 = performance.now();
   const spinScene = new THREE.Scene(), spinCam = new THREE.PerspectiveCamera(30, 1, 0.5, 2000);
-  const spinHemi = new THREE.HemisphereLight(0xffffff, 0x2a2a2a, 0.8), spinSun = new THREE.DirectionalLight(0xffffff, 1.8), spinFill = new THREE.DirectionalLight(0xffffff, 0.35);
+  const spinHemi = new THREE.HemisphereLight(0xffffff, 0x2a2a2a, 1.4), spinSun = new THREE.DirectionalLight(0xffffff, 1.5), spinFill = new THREE.DirectionalLight(0xffffff, 0.35);
   spinScene.add(spinHemi, spinSun, spinSun.target, spinFill);
   const spinRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); spinRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); spinRenderer.setSize(180, 180);
   function tick(now) {
