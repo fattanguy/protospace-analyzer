@@ -11,10 +11,11 @@ import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, occupancyOf
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+/* The palette: one distinct hue per design; every solid shades from that colour at the top to near-black at the base. */
 const HUES = [20, 196, 42, 262, 150, 330, 212, 72, 300, 100, 240, 0, 176, 48, 285];
 const hsl = (h, s, l) => { s /= 100; l /= 100; const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l), f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)); return '#' + [f(0), f(8), f(4)].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''); };
 /* Each design gets two colours, top and base; its solid is painted top to bottom with them, and a blend of designs is painted with the blend of their colours. */
-const colorsOf = i => { const h = HUES[i % HUES.length]; return [hsl(h, 70, 58), hsl((h + 40) % 360, 55, 36)]; };
+const colorsOf = i => { const h = HUES[i % HUES.length]; return [hsl(h, 72, 63), hsl(h, 60, 5)]; };    // top: the design's own light colour; base: the same hue, almost black
 const colorOf = i => colorsOf(i)[0];
 const rgbOf = hex => [1, 3, 5].map(o => parseInt(hex.slice(o, o + 2), 16) / 255);
 const hexOf = rgb => '#' + rgb.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
@@ -32,9 +33,9 @@ function makeThumbs() {
   const S = 216, renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(1); renderer.setSize(S, S); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene();
-  const hemi = new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 1.0); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xffffff, 2.2); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.08; scene.add(sun); scene.add(sun.target);
-  const fill = new THREE.DirectionalLight(0xffffff, 0.4); fill.position.set(60, 20, -40); scene.add(fill);
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x2a2a2a, 0.8); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffffff, 1.9); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024); sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.08; scene.add(sun); scene.add(sun.target);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(60, 20, -40); scene.add(fill);
   const camera = new THREE.PerspectiveCamera(30, 1, 0.5, 2000);
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
   const dark = () => { const t = document.documentElement.dataset.theme; return t === 'dark' || (t !== 'light' && !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)); };
@@ -43,8 +44,11 @@ function makeThumbs() {
   function geometryOf(occ, N, colors) {                                           // the solid's outer faces, one quad each, painted top to base
     const at = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < N && y < N && z < N && occ[x + N * (y + N * z)];
     const pos = [], nor = [], col = [], idx = []; let n = 0;
-    const [top, base] = colors, top3 = rgbOf(top), base3 = rgbOf(base);
-    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); const t = Math.pow(p[1] / N, 0.8); col.push(base3[0] + (top3[0] - base3[0]) * t, base3[1] + (top3[1] - base3[1]) * t, base3[2] + (top3[2] - base3[2]) * t); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
+    const [top, base] = colors, top3 = new THREE.Color(top).toArray(), base3 = new THREE.Color(base).toArray();   // sRGB → linear, as vertex colours must be
+    let yMin = N, yMax = 0;                                                       // the fade runs over the solid's own height
+    for (let i = 0; i < occ.length; i++) if (occ[i]) { const y = ((i / N) | 0) % N; if (y < yMin) yMin = y; if (y > yMax) yMax = y; }
+    const span = Math.max(1, yMax + 1 - yMin);
+    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); const t = Math.pow(clamp((p[1] - yMin) / span, 0, 1), 2.1); col.push(base3[0] + (top3[0] - base3[0]) * t, base3[1] + (top3[1] - base3[1]) * t, base3[2] + (top3[2] - base3[2]) * t); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
     for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       if (!occ[x + N * (y + N * z)]) continue;
       const x0 = x, x1 = x + 1, y0 = y, y1 = y + 1, z0 = z, z1 = z + 1;
@@ -81,7 +85,7 @@ function makeThumbs() {
      one shared renderer — smooth, and one WebGL context however many previews are on the page. */
   const live = new Map(); let raf = null, t0 = performance.now();
   const spinScene = new THREE.Scene(), spinCam = new THREE.PerspectiveCamera(30, 1, 0.5, 2000);
-  const spinHemi = new THREE.HemisphereLight(0xffffff, 0x3a3a3a, 1.0), spinSun = new THREE.DirectionalLight(0xffffff, 2.0), spinFill = new THREE.DirectionalLight(0xffffff, 0.4);
+  const spinHemi = new THREE.HemisphereLight(0xffffff, 0x2a2a2a, 0.8), spinSun = new THREE.DirectionalLight(0xffffff, 1.8), spinFill = new THREE.DirectionalLight(0xffffff, 0.35);
   spinScene.add(spinHemi, spinSun, spinSun.target, spinFill);
   const spinRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); spinRenderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); spinRenderer.setSize(180, 180);
   function tick(now) {
@@ -149,10 +153,21 @@ function spinDesign(d) { const c = R.designs && R.designs.querySelector(`[data-s
    its design's own colours and a tile between designs shows the blend of theirs. */
 function tileColors(n) {
   const m = E.map, nD = E.designs.length; if (!m || !nD || !m.dists) return ['#f2efe9', '#d8d3cc'];
-  let top = [0, 0, 0], base = [0, 0, 0], sum = 0;
-  for (let i = 0; i < nD; i++) { const w = 1 / Math.pow(m.dists[n.k * nD + i] + 1e-6, 2.5); sum += w; const [t, b] = [rgbOf(E.designs[i].colors[0]), rgbOf(E.designs[i].colors[1])]; for (let c = 0; c < 3; c++) { top[c] += w * t[c]; base[c] += w * b[c]; } }
-  return [hexOf(top.map(v => v / sum)), hexOf(base.map(v => v / sum))];
+  // blended in hue space (a weighted circular mean), so an in-between tile stays as vivid as the designs it sits between
+  const acc = [[0, 0, 0, 0], [0, 0, 0, 0]]; let sum = 0;
+  for (let i = 0; i < nD; i++) {
+    const w = 1 / Math.pow(m.dists[n.k * nD + i] + 1e-6, 2.5); sum += w;
+    for (let j = 0; j < 2; j++) { const [h, s, l] = hslOf(E.designs[i].colors[j]), a = h * Math.PI / 180; acc[j][0] += w * Math.cos(a); acc[j][1] += w * Math.sin(a); acc[j][2] += w * s; acc[j][3] += w * l; }
+  }
+  return acc.map(([x, y, s, l]) => hsl((Math.atan2(y, x) * 180 / Math.PI + 360) % 360, s / sum, l / sum));
 }
+const hslOf = hex => {                                                            // '#rrggbb' → [h 0–360, s 0–100, l 0–100]
+  const [r, g, b] = rgbOf(hex), mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l * 100];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s * 100, l * 100];
+};
 function tileMix(n) {                                                            // the share of each design in a tile, for the legend
   const m = E.map, nD = E.designs.length, w = []; let sum = 0;
   for (let i = 0; i < nD; i++) { const v = 1 / Math.pow(m.dists[n.k * nD + i] + 1e-6, 2.5); w.push(v); sum += v; }
