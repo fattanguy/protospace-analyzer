@@ -397,7 +397,7 @@ const HTML = `
   <aside class="xp-controls" aria-label="Controls">
     <h2 class="eyebrow">Designs</h2>
     <label class="xp-drop" data-v="drop"><input type="file" multiple accept=".obj,.stl,.glb,.gltf" hidden><b>Drop closed solids</b><span>OBJ · STL · GLB · GLTF → <output data-v="N">32</output>³ voxels</span><span class="hint" data-v="dropMsg"></span></label>
-    <div class="xp-row"><span class="lbl">Add the printed spaces</span><button type="button" class="btn quiet" data-cat="lobby" title="01–05, as the smooth solids they were printed from">Lobbies</button><button type="button" class="btn quiet" data-cat="office" title="06–10">Workspaces</button><button type="button" class="btn quiet" data-cat="social" title="11–15">Social areas</button><button type="button" class="btn quiet" data-cat="all" data-v="addSpaces">All fifteen</button></div>
+    <div class="xp-row"><span class="lbl">Add the Voronoi spaces</span><button type="button" class="btn quiet" data-cat="lobby" title="01–05: the five best lobbies of the Voronoi animations, as SubD solids">Lobbies</button><button type="button" class="btn quiet" data-cat="office" title="06–10: the five best workspaces">Workspaces</button><button type="button" class="btn quiet" data-cat="social" title="11–15: the five best gathering spaces">Gathering</button><button type="button" class="btn quiet" data-cat="all" data-v="addSpaces">All fifteen</button></div>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="addBays" title="The five bays of the frame open in Analyze / Program / 3D model, each as a design">Add the bays of the frame on screen</button><button type="button" class="btn quiet" data-v="clear" title="Remove every design">Clear</button><span class="hint" data-v="count"></span></div>
     <div data-v="designs" class="xp-designs"></div>
 
@@ -479,10 +479,10 @@ export function mount(root, hooks = {}) {
         if (E.designs.some(d => d.space === it.id)) continue;
         R.dropMsg.textContent = `Reading ${it.id} ${it.name}…`;
         const tris = await loadModelUrl(it.file), v = voxelize(tris, E.N);
-        addDesign(`${it.id} ${it.name}`, v.occ, E.N, { filled: v.filled, triangles: v.triangles, source: 'space', space: it.id, tris, note: `${it.anim} · frame ${it.frame} · bays ${it.bay}–${it.bay + 2} · ${it.rating}` });
+        addDesign(`${it.id} ${it.name}`, v.occ, E.N, { filled: v.filled, triangles: v.triangles, source: 'space', space: it.id, tris, note: `${it.typology} · ${it.anim} · frame ${it.frame} · bay ${it.bay} · ${it.use} ${it.score}/100 · ${it.rating}` });
         E.map = null; renderDesigns();
       }
-      R.dropMsg.textContent = `${list.length} spaces added: from the boards, smoothed the way they were printed.`;
+      R.dropMsg.textContent = `${list.length} spaces added: the best Voronoi bays by the Program scores, as SubD solids.`;
     } catch (err) { R.dropMsg.textContent = 'The spaces could not be loaded: ' + (err.message || err); }
     btn.disabled = false; renderAll();
   }));
