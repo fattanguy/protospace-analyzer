@@ -18,7 +18,7 @@ const colorsOf = i => { const h = HUES[i % HUES.length]; return [hsl(h, 70, 58),
 const colorOf = i => colorsOf(i)[0];
 const rgbOf = hex => [1, 3, 5].map(o => parseInt(hex.slice(o, o + 2), 16) / 255);
 const hexOf = rgb => '#' + rgb.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
-const SPIN = 24;                                                                  // frames in a turning preview
+const SPIN = 48;                                                                  // frames in a turning preview (one turn every ~11 s)
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -60,10 +60,10 @@ function makeThumbs() {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(idx);
     return g;
   }
-  function place(occ, N, colors) {
-    if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); } if (base) scene.remove(base);
-    mesh = new THREE.Mesh(geometryOf(occ, N, colors || ['#f2efe9', '#d8d3cc']), mat); mesh.castShadow = mesh.receiveShadow = true; scene.add(mesh);
-    base = new THREE.Mesh(new THREE.BoxGeometry(N + 4, 0.5, N + 4), baseMat); base.position.set(N / 2, 0.75, -N / 2); base.receiveShadow = true; scene.add(base);
+  function place(occ, N, colors, withBase = true) {
+    if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); } if (base) { scene.remove(base); base = null; }
+    mesh = new THREE.Mesh(geometryOf(occ, N, colors || ['#f2efe9', '#d8d3cc']), mat); mesh.castShadow = mesh.receiveShadow = withBase; scene.add(mesh);
+    if (withBase) { base = new THREE.Mesh(new THREE.BoxGeometry(N + 4, 0.5, N + 4), baseMat); base.position.set(N / 2, 0.75, -N / 2); base.receiveShadow = true; scene.add(base); }
     const ctr = new THREE.Vector3(N / 2, N * 0.38, -N / 2);
     sun.position.copy(ctr).add(new THREE.Vector3(-0.55, 1, 0.75).multiplyScalar(N * 1.6)); sun.target.position.copy(ctr);
     const sc = sun.shadow.camera; sc.left = sc.bottom = -N; sc.right = sc.top = N; sc.near = 1; sc.far = N * 5; sc.updateProjectionMatrix();
@@ -78,7 +78,7 @@ function makeThumbs() {
     return renderer.domElement.toDataURL('image/png');
   }
   function render(occ, N, colors) { const ctr = place(occ, N, colors); return shoot(ctr, N, 0, S); }
-  function turntable(occ, N, colors, frames = SPIN, size = 144) { const ctr = place(occ, N, colors); const out = []; for (let i = 0; i < frames; i++) out.push(shoot(ctr, N, i * 2 * Math.PI / frames, size)); return out; }
+  function turntable(occ, N, colors, frames = SPIN, size = 144) { const ctr = place(occ, N, colors, false); const out = []; for (let i = 0; i < frames; i++) out.push(shoot(ctr, N, i * 2 * Math.PI / frames, size)); return out; }   // the turning previews: no base, no shadow
   return { render, turntable };
 }
 
@@ -135,7 +135,7 @@ function startSpin() {                                                          
     f = (f + 1) % SPIN;
     for (const d of E.designs) { const im = R.designs.querySelector(`[data-spin="${d.id}"]`); if (im && d.spin) im.src = d.spin[f]; }
     const t = R.detail.querySelector('[data-spin="tile"]'); if (t && E.tileSpin) t.src = E.tileSpin[f];
-  }, 90);
+  }, 230);
 }
 
 // ------------------------------------------------------------------ the map
