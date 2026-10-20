@@ -419,6 +419,7 @@
 .xp-design .xp-spin { grid-area: s; } .xp-design .xp-letter { grid-area: l; } .xp-design .xp-name { grid-area: n; } .xp-design .xp-fill { grid-area: f; } .xp-design .xp-x { grid-area: x; }
 .xp-spin { width: 64px; height: 64px; object-fit: cover; background: var(--panel); border: 1px solid var(--rule); justify-self: end; }
 .xp-spin.big { width: 180px; height: 180px; justify-self: start; }
+.xp-card .xp-spin.card { width: 100%; height: auto; aspect-ratio: 1; border: 0; border-bottom: 1px solid var(--rule); justify-self: stretch; }
 .xp-colors { grid-area: c; display: flex; align-items: center; gap: 6px; }
 .xp-colors input[type=color] { width: 22px; height: 18px; padding: 0; border: 1px solid var(--rule); background: none; cursor: pointer; }
 .xp-colors input[type=color]::-webkit-color-swatch-wrapper { padding: 1px; } .xp-colors input[type=color]::-webkit-color-swatch { border: 0; }

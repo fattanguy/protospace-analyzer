@@ -91,13 +91,17 @@ function makeThumbs() {
   function tick(now) {
     raf = null;
     const angle = ((now - t0) / 12000) * 2 * Math.PI;                             // one turn every 12 s
-    let any = false;
+    const dpr = spinRenderer.getPixelRatio(), show = [];
     for (const [canvas, e] of live) {
       if (!canvas.isConnected) { live.delete(canvas); e.mesh.geometry.dispose(); continue; }
-      const r = canvas.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight || r.width === 0) { any = true; continue; }   // off screen: skip
-      any = true;
-      const size = Math.round(r.width) || 144; if (spinRenderer.domElement.width !== size * spinRenderer.getPixelRatio()) spinRenderer.setSize(size, size, false);
-      if (canvas.width !== spinRenderer.domElement.width) { canvas.width = spinRenderer.domElement.width; canvas.height = spinRenderer.domElement.height; }
+      const r = canvas.getBoundingClientRect(); if (r.bottom < 0 || r.top > innerHeight || r.width === 0) continue;   // off screen: skip
+      show.push([canvas, e, Math.round(r.width) || 144]);
+    }
+    // one render size a frame: the biggest preview on screen, so every canvas is drawn at its own resolution or better
+    const big = Math.min(1024, Math.max(144, ...show.map(x => x[2])));
+    if (spinRenderer.domElement.width !== big * dpr) spinRenderer.setSize(big, big, false);
+    for (const [canvas, e, size] of show) {
+      if (canvas.width !== size * dpr) { canvas.width = size * dpr; canvas.height = size * dpr; }
       spinScene.add(e.mesh);
       const N = e.N, ctr = new THREE.Vector3(N / 2, N * 0.38, -N / 2);
       const dir = new THREE.Vector3(-0.95, 0.72, 1.25).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
@@ -105,9 +109,9 @@ function makeThumbs() {
       spinSun.position.copy(ctr).add(new THREE.Vector3(-0.55, 1, 0.75).applyAxisAngle(new THREE.Vector3(0, 1, 0), angle).multiplyScalar(N * 1.6)); spinSun.target.position.copy(ctr);
       spinHemi.groundColor.set(dark() ? 0x3a3a3a : 0xb5aea6);
       spinRenderer.render(spinScene, spinCam); spinScene.remove(e.mesh);
-      const g = canvas.getContext('2d'); g.clearRect(0, 0, canvas.width, canvas.height); g.drawImage(spinRenderer.domElement, 0, 0);
+      const g = canvas.getContext('2d'); g.clearRect(0, 0, canvas.width, canvas.height); g.drawImage(spinRenderer.domElement, 0, 0, canvas.width, canvas.height);
     }
-    if (any) raf = requestAnimationFrame(tick);
+    if (live.size) raf = requestAnimationFrame(tick);
   }
   function spin(canvas, occ, N, colors) {                                        // (re)register a canvas to show this solid turning
     const old = live.get(canvas); if (old) old.mesh.geometry.dispose();
@@ -344,7 +348,8 @@ function renderStrip() {                                                        
   el.hidden = !ks.length;
   if (!ks.length) return;
   el.innerHTML = ks.map((k, i) => { const n = m.nodes[k]; return `<button type="button" class="xp-card${k === E.sel ? ' on' : ''}" data-k="${k}">
-      <img src="${n.thumb || ''}" alt=""><div class="t"><em>${E.tool === 'path' ? i + 1 : ''}</em> Tile (${n.x}, ${n.y})</div><div class="hint">${esc(nodeName(n))}</div>${E.criteria.length ? critBars(n.crit) : ''}</button>`; }).join('');
+      <canvas class="xp-spin card" data-spin="k${k}" width="360" height="360"></canvas><div class="t"><em>${E.tool === 'path' ? i + 1 : ''}</em> Tile (${n.x}, ${n.y})</div><div class="hint">${esc(nodeName(n))}</div>${E.criteria.length ? critBars(n.crit) : ''}</button>`; }).join('');
+  ks.forEach(k => { const n = m.nodes[k]; E.thumbs.spin(el.querySelector(`[data-spin="k${k}"]`), n.occ, m.N, n.colors); });
   if (E.tool === 'path' && E.path.cells) R.pathNote.textContent = `${E.path.cells.length} tiles · the design changes as little as possible from one step to the next.`;
 }
 function renderTools() {
