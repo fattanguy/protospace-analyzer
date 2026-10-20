@@ -47,8 +47,8 @@ function makeThumbs() {
     const [top, base] = colors, top3 = new THREE.Color(top).toArray(), base3 = new THREE.Color(base).toArray();   // sRGB → linear, as vertex colours must be
     let yMin = N, yMax = 0;                                                       // the fade runs over the solid's own height
     for (let i = 0; i < occ.length; i++) if (occ[i]) { const y = ((i / N) | 0) % N; if (y < yMin) yMin = y; if (y > yMax) yMax = y; }
-    const span = Math.max(1, yMax + 1 - yMin);
-    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); const t = Math.pow(clamp((p[1] - yMin) / span, 0, 1), 2.4); col.push(base3[0] + (top3[0] - base3[0]) * t, base3[1] + (top3[1] - base3[1]) * t, base3[2] + (top3[2] - base3[2]) * t); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
+    const span = Math.max(1, yMax + 1 - yMin);                                    // black up to ~40 % of the height, then up to full colour at the top
+    const quad = (a, b, c, d, nx, ny, nz) => { for (const p of [a, b, c, d]) { pos.push(p[0], p[1], -p[2]); nor.push(nx, ny, nz); const t = Math.pow(clamp(((p[1] - yMin) / span - 0.42) / 0.58, 0, 1), 1.3); col.push(base3[0] + (top3[0] - base3[0]) * t, base3[1] + (top3[1] - base3[1]) * t, base3[2] + (top3[2] - base3[2]) * t); } idx.push(n, n + 1, n + 2, n, n + 2, n + 3); n += 4; };
     for (let z = 0; z < N; z++) for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       if (!occ[x + N * (y + N * z)]) continue;
       const x0 = x, x1 = x + 1, y0 = y, y1 = y + 1, z0 = z, z1 = z + 1;
