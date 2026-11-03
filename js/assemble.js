@@ -133,7 +133,8 @@ function adjacent(a, b) { const [ca, ra] = cellOf(a), [cb, rb] = cellOf(b); retu
    the whole front (the public rooms), then the rest grows one module at a time — each goes where it touches modules of
    other uses, never beside its own kind if it can help it; lobbies stay at ground on a public edge (the street row or a
    causeway side), offices lean to the upper floors, gathering rooms to the middle of things, nothing floats and
-   everything touches. The seed varies the result. */
+   everything touches. Then, wherever a module's seams would stay open, hybrids are added beside or on it to make the
+   joins. The seed varies the result. */
 function autoArrange(seed = Date.now() % 1000) {
   let sd = (seed * 9301 + 49297) % 233280; const rnd = () => (sd = (sd * 9301 + 49297) % 233280) / 233280;
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -165,7 +166,55 @@ function autoArrange(seed = Date.now() % 1000) {
     }
     if (best) place(best.L, best.k, m, rot());
   }
+  // hybrids where the connections are not optimal: a module is weakly joined when one of its seams would stay open
+  // (no mass of its neighbour meets its own). For every empty bay beside such a module — or on top of it — every
+  // hybrid is tried at every turn, and the one that joins the weak module through the seam, and as many other
+  // neighbours as it can, is placed; up to five of them
+  const hybrids = A.modules.filter(m => m.use === 'hybrid'), used = new Set();
+  const weakOnes = () => { const w = new Set(); for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (!t) return; const cn = joinsAt(L, k, t.mod, t.rot); if (cn.length && cn.some(x => !x.through)) w.add(`${L}:${k}`); }); return w; };
+  for (let added = 0; added < 5 && hybrids.length; added++) {
+    const weak = weakOnes(); if (!weak.size) break;
+    let best = null;
+    for (let L = 0; L < 3; L++) for (let k = 0; k < SITE.cols * SITE.rows; k++) {
+      if (A.boards[L][k] || (L > 0 && !A.boards[L - 1][k])) continue;
+      if (!joinsAt(L, k, hybrids[0], 0).some(x => weak.has(`${x.L}:${x.k}`))) continue;                          // only beside (or on) a weakly joined module
+      for (const h of hybrids) { if (used.has(h.id)) continue; for (let rot = 0; rot < 4; rot++) {
+        const cn = joinsAt(L, k, h, rot), sc = cn.reduce((acc, x) => acc + (x.through ? (weak.has(`${x.L}:${x.k}`) ? 2 : 1) : 0), 0) + cn.length * 0.1 - L * 0.05 + rnd() * 0.3;   // the seed picks among equals
+        if (sc >= 2 && (!best || sc > best.sc)) best = { L, k, h, rot, sc };
+      } }
+    }
+    if (!best) break;
+    place(best.L, best.k, best.h, best.rot); used.add(best.h.id);
+  }
   A.sel = null; renderBoard(); build();
+}
+/* Would a module, turned so, placed at a bay, join each of its neighbours through the seam? The seam morph runs
+   straight through wherever the two facing sections (the three voxel slices at each one's edge) have mass at the same
+   place, so each module keeps, per turn, a bit-mask of its six faces and the test is an overlap of masks. */
+function sidesOf(m, rot) {
+  m.sides ||= {}; if (m.sides[rot]) return m.sides[rot];
+  const n = N, occS = new Uint8Array(n * n * n); let umin = n, umax = -1, vmin = n, vmax = -1, ymin = n, ymax = -1;
+  for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (!m.occ[x + n * (y + n * z)]) continue; const [u, v] = latToSlot(x, z, rot); occS[u + n * (y + n * v)] = 1;
+    if (u < umin) umin = u; if (u > umax) umax = u; if (v < vmin) vmin = v; if (v > vmax) vmax = v; if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+  }
+  const S = new Uint32Array(n), Nn = new Uint32Array(n), E = new Uint32Array(n), W = new Uint32Array(n), T = new Uint32Array(n), B = new Uint32Array(n);   // S/N over (y → bits v), E/W over (y → bits u), T/B over (u → bits v)
+  for (let v = 0; v < n; v++) for (let y = 0; y < n; y++) for (let u = 0; u < n; u++) {
+    if (!occS[u + n * (y + n * v)]) continue;
+    if (u >= umax - 2) S[y] |= 1 << v; if (u <= umin + 2) Nn[y] |= 1 << v;
+    if (v >= vmax - 2) E[y] |= 1 << u; if (v <= vmin + 2) W[y] |= 1 << u;
+    if (y >= ymax - 2) T[u] |= 1 << v; if (y <= ymin + 2) B[u] |= 1 << v;
+  }
+  return (m.sides[rot] = { S, N: Nn, E, W, T, B });
+}
+const overlap = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] & b[i]) return true; return false; };
+function joinsAt(L, k, m, rot) {
+  const [c, r] = cellOf(k), mine = sidesOf(m, rot), out = [];
+  const test = (L2, k2, a, b) => { const t2 = A.boards[L2][k2]; if (t2) out.push({ L: L2, k: k2, through: overlap(mine[a], sidesOf(t2.mod, t2.rot)[b]) }); };
+  if (c + 1 < SITE.cols) test(L, idx(c + 1, r), 'S', 'N'); if (c > 0) test(L, idx(c - 1, r), 'N', 'S');
+  if (r + 1 < SITE.rows) test(L, idx(c, r + 1), 'E', 'W'); if (r > 0) test(L, idx(c, r - 1), 'W', 'E');
+  if (L > 0) test(L - 1, k, 'B', 'T'); if (L < 2) test(L + 1, k, 'T', 'B');
+  return out;
 }
 // ------------------------------------------------------------------ connections: seams, cores
 /* The module's lattice side facing a world direction, given its quarter turns. Lattice: +x, −x across; z = 0 front,
