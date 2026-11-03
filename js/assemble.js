@@ -142,14 +142,14 @@ function autoArrange(seed = Date.now() % 1000) {
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const by = u => A.modules.filter(m => m.use === u && (m.source === 'catalogue' || u === 'som'));
   // every module is turned to face: lobbies open to their public edge (the street, or the causeway they sit on), everything else to the bay
-  const facing = (m, k) => { const [c, r] = cellOf(k); return rotFacing(m, m.use === 'lobby' ? (r === 0 ? 'W' : c === 0 ? 'N' : c === SITE.cols - 1 ? 'S' : 'W') : 'E'); };
+  const facing = (m, L, k) => { const [c, r] = cellOf(k); if (m.use === 'lobby') return rotFacing(m, r === 0 ? 'W' : c === 0 ? 'N' : c === SITE.cols - 1 ? 'S' : 'W'); if (m.use === 'office') return rotFacing(m, 'E'); return rotFacing(m, clearTo(L, k, 'S') ? 'S' : clearTo(L, k, 'W') ? 'W' : 'S'); };   // lobbies to their public edge, workspaces to the bay, the rest to the museums or the Arsht Center
   for (let i = 0; i < 3; i++) clearLayer(i);
   // the programme: every module once, two offices and a gathering room twice (the cabal floors), dealt out lobby · office · gathering in turn
   const pools = { lobby: shuffle(by('lobby')), office: shuffle(by('office').concat(by('som'))), social: shuffle(by('social')) };
   pools.office = pools.office.concat(pools.office.slice(0, 2)); pools.social = pools.social.concat(pools.social.slice(0, 1));   // the cabal floors: two offices and a gathering room again
   // the street row first: lobbies and gathering rooms alternating along the whole front, starting with either
   let u = rnd() < 0.5 ? 'lobby' : 'social';
-  for (let c = 0; c < SITE.cols; c++) { const m = pools[u].shift(); if (m) place(0, idx(c, 0), m, facing(m, idx(c, 0))); u = u === 'lobby' ? 'social' : 'lobby'; }
+  for (let c = 0; c < SITE.cols; c++) { const m = pools[u].shift(); if (m) place(0, idx(c, 0), m, facing(m, 0, idx(c, 0))); u = u === 'lobby' ? 'social' : 'lobby'; }
   const queue = []; while (pools.lobby.length || pools.office.length || pools.social.length) for (const w of ['lobby', 'office', 'social']) if (pools[w].length) queue.push(pools[w].shift());
   const publicEdge = (c, r) => r === 0 || c === 0 || c === SITE.cols - 1;
   const usesAround = (L, k) => { const out = []; for (const j of neighboursOf(k)) if (A.boards[L][j]) out.push(A.boards[L][j].mod.use); if (L > 0 && A.boards[L - 1][k]) out.push(A.boards[L - 1][k].mod.use); if (L < 2 && A.boards[L + 1][k]) out.push(A.boards[L + 1][k].mod.use); return out; };
@@ -161,6 +161,11 @@ function autoArrange(seed = Date.now() % 1000) {
       if (m.use === 'lobby' && (L > 0 || !publicEdge(c, r))) continue;                                         // lobbies at ground, on a public edge
       const nb = usesAround(L, k); if (!nb.length) continue;                                                   // it must touch the building
       let sc = 0; for (const u of nb) sc += u === m.use ? -2 : 2.5;                                            // mixed: other uses beside it, its own kind kept apart
+      const ng = nb.filter(u => u === 'social').length, nh = nb.filter(u => u === 'hybrid').length;
+      if (m.use === 'office' || m.use === 'lobby') sc += Math.min(2, ng) * 1.5 + (ng && nh ? 1.5 : 0);         // reached through gathering rooms (and hybrids)
+      if (m.use === 'office') { if (!clearTo(L, k, 'E')) sc -= 4; }                                              // workspaces look at the bay, nothing in the way
+      if (m.use === 'social') { if (!clearTo(L, k, 'S') && !clearTo(L, k, 'W')) sc -= 3; }                      // gathering rooms look to the museums or the Arsht Center
+      sc -= 4 * viewsLost(L, k);                                                                                // never take a view away
       sc += Math.min(nb.length, 3) * 0.6 + (L > 0 && nb.length > 1 ? 2.2 : 0);                                 // compact: upstairs, beside another module rather than alone on a roof
       if (m.use === 'office') sc += L * 1.4 - (L === 0 ? 1 : 0);                                               // offices up where the views are
       if (m.use === 'social') sc += (r === 1 ? 1 : 0) + (L === 0 ? 0.4 : 0);                                    // gathering rooms in the middle of things
@@ -168,22 +173,29 @@ function autoArrange(seed = Date.now() % 1000) {
       sc += rnd() * 1.6;
       if (sc > bestS) { bestS = sc; best = { L, k }; }
     }
-    if (best) place(best.L, best.k, m, facing(m, best.k));
+    if (best) place(best.L, best.k, m, facing(m, best.L, best.k));
   }
-  // hybrids where the connections are not optimal: a module is weakly joined when one of its seams would stay open
-  // (no mass of its neighbour meets its own). For every empty bay beside such a module — or on top of it — every
-  // hybrid is tried at every turn, and the one that joins the weak module through the seam, and as many other
-  // neighbours as it can, is placed; up to five of them
+  // every module turned for good now that the plan is known: workspaces to the bay; gathering rooms west to the
+  // Arsht Center if that is clear, else south to the museums; lobbies to their public edge
+  for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (!t) return; if (t.mod.use === 'office') t.rot = rotFacing(t.mod, 'E'); else if (t.mod.use === 'social') t.rot = rotFacing(t.mod, clearTo(L, k, 'W') ? 'W' : 'S'); else if (t.mod.use === 'lobby') t.rot = facing(t.mod, L, k); });
+  // hybrids where the plan falls short: beside a module whose seam would stay open (no mass meets), or a workspace
+  // that is not yet reached through two gathering rooms (a hybrid beside one it already touches completes that).
+  // Every hybrid is tried at every turn in each such bay; the one that joins through the most seams, completes the
+  // most access, does not take a view away and looks to the museums or the Arsht Center is placed; up to six
   const hybrids = A.modules.filter(m => m.use === 'hybrid'), used = new Set();
-  const weakOnes = () => { const w = new Set(); for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (!t) return; const cn = joinsAt(L, k, t.mod, t.rot); if (cn.length && cn.some(x => !x.through)) w.add(`${L}:${k}`); }); return w; };
-  for (let added = 0; added < 5 && hybrids.length; added++) {
-    const weak = weakOnes(); if (!weak.size) break;
+  const kindsAt = (L, k) => { const out = { lobby: 0, office: 0, social: 0, hybrid: 0, som: 0 }; for (const j of neighboursOf(k)) if (A.boards[L][j]) out[A.boards[L][j].mod.use]++; if (L > 0 && A.boards[L - 1][k]) out[A.boards[L - 1][k].mod.use]++; if (L < 2 && A.boards[L + 1][k]) out[A.boards[L + 1][k].mod.use]++; return out; };
+  const hasAccess = (L, k) => { const n = kindsAt(L, k); return n.social >= 2 || (n.social >= 1 && n.hybrid >= 1); };
+  const needy = () => { const w = new Set(); for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (!t) return; const cn = joinsAt(L, k, t.mod, t.rot); if ((cn.length && cn.some(x => !x.through)) || ((t.mod.use === 'office' || t.mod.use === 'hybrid') && !hasAccess(L, k))) w.add(`${L}:${k}`); }); return w; };
+  for (let added = 0; added < 6 && hybrids.length; added++) {
+    const need = needy(); if (!need.size) break;
     let best = null;
     for (let L = 0; L < 3; L++) for (let k = 0; k < SITE.cols * SITE.rows; k++) {
-      if (A.boards[L][k] || (L > 0 && !A.boards[L - 1][k])) continue;
-      if (!joinsAt(L, k, hybrids[0], 0).some(x => weak.has(`${x.L}:${x.k}`))) continue;                          // only beside (or on) a weakly joined module
+      if (A.boards[L][k] || (L > 0 && !A.boards[L - 1][k]) || viewsLost(L, k)) continue;
+      const nbs = joinsAt(L, k, hybrids[0], 0); if (!nbs.some(x => need.has(`${x.L}:${x.k}`))) continue;
+      const completes = nbs.filter(x => { const t = A.boards[x.L][x.k]; return (t.mod.use === 'office' || t.mod.use === 'hybrid') && !hasAccess(x.L, x.k) && kindsAt(x.L, x.k).social >= 1; }).length;
       for (const h of hybrids) { if (used.has(h.id)) continue; for (let rot = 0; rot < 4; rot++) {
-        const cn = joinsAt(L, k, h, rot), sc = cn.reduce((acc, x) => acc + (x.through ? (weak.has(`${x.L}:${x.k}`) ? 2 : 1) : 0), 0) + cn.length * 0.1 - L * 0.05 + rnd() * 0.3;   // the seed picks among equals
+        const cn = joinsAt(L, k, h, rot), face = sidesOf(h, rot).open;
+        const sc = cn.reduce((acc, x) => acc + (x.through ? (need.has(`${x.L}:${x.k}`) ? 2 : 1) : 0), 0) + completes * 2 + cn.length * 0.1 - L * 0.05 + ((face === 'S' || face === 'W') && clearTo(L, k, face) ? 1 : 0) + rnd() * 0.3;
         if (sc >= 2 && (!best || sc > best.sc)) best = { L, k, h, rot, sc };
       } }
     }
@@ -220,6 +232,28 @@ function sidesOf(m, rot) {
 }
 /* The turn that puts the module's open facade on a given side (E = the bay, W = the street, N / S = the causeways). */
 function rotFacing(m, side) { for (let r = 0; r < 4; r++) if (sidesOf(m, r).open === side) return r; return 1; }
+/* Nothing placed on the same layer between a bay and the edge of the lot on that side: an unobstructed view. */
+function clearTo(L, k, side) {
+  const [c, r] = cellOf(k), b = A.boards[L];
+  if (side === 'E') { for (let r2 = r + 1; r2 < SITE.rows; r2++) if (b[idx(c, r2)]) return false; }
+  else if (side === 'W') { for (let r2 = 0; r2 < r; r2++) if (b[idx(c, r2)]) return false; }
+  else if (side === 'S') { for (let c2 = c + 1; c2 < SITE.cols; c2++) if (b[idx(c2, r)]) return false; }
+  else { for (let c2 = 0; c2 < c; c2++) if (b[idx(c2, r)]) return false; }
+  return true;
+}
+/* Filling a bay takes a view away when a workspace west of it on the same floor still sees the bay, or a gathering
+   room / hybrid that still has a clear south or west would lose its last clear side. */
+function viewsLost(L, k) {
+  const [c, r] = cellOf(k), b = A.boards[L]; let n = 0;
+  for (let r2 = 0; r2 < r; r2++) { const t = b[idx(c, r2)]; if (t && t.mod.use === 'office' && clearTo(L, idx(c, r2), 'E')) n++; }
+  const lastClear = (k2, side) => { const t = b[k2]; if (!t || (t.mod.use !== 'social' && t.mod.use !== 'hybrid')) return false; const other = side === 'S' ? 'W' : 'S'; return clearTo(L, k2, side) && !clearTo(L, k2, other); };
+  for (let c2 = 0; c2 < c; c2++) if (lastClear(idx(c2, r), 'S')) n++;                                          // rooms north of here that look south across this bay
+  for (let r2 = r + 1; r2 < SITE.rows; r2++) if (lastClear(idx(c, r2), 'W')) n++;                               // rooms east of here that look west across this bay
+  return n;
+}
+/* The surroundings a gathering room or hybrid can look to: the museums across MacArthur Causeway to the south
+   (Museum Park, PAMM, Frost), the Arsht Center and Herald Plaza to the west. */
+const LOOKS = { S: 'the museums — Museum Park, PAMM, Frost', W: 'the Arsht Center and Herald Plaza' };
 const SIDE_NAME = { E: 'east — the bay', W: 'west — the street', N: 'north — the Venetian Causeway', S: 'south — the MacArthur Causeway' };
 const overlap = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] & b[i]) return true; return false; };
 function joinsAt(L, k, m, rot) {
@@ -323,11 +357,11 @@ function latticeToLocal(m, X, Y, Z) {
   return [X * LAT + m.shift[0], Y * LAT + m.shift[1], -Z * LAT + m.shift[2]];
 }
 const DECK_T = 0.7;                                                                 // the pad's thickness (m)
-/* The deck and the pilotis under a ground module, only where it stands: the footprint of its lowest two voxel layers,
-   closed and grown by two voxels so nearby feet share one pad, as a slab contoured at half-voxel resolution (so its
-   edge is smooth, not stepped), with a column on a 6 m grid wherever the pad is. The pad is drawn in the module's own
-   lattice and put where the module is: through the lattice frame when the building is fused, through the mesh's
-   placement matrix when the modules are separate. */
+/* The deck and the pilotis under a ground module, only where it stands: exactly the footprint of its lowest storey
+   (its lowest three voxel layers), enclosed holes filled, nothing added at the edge, as a slab contoured at half-voxel
+   resolution, with a column on a 6 m grid wherever the pad is. The pad is drawn in the module's own lattice and put
+   where the module is: through the lattice frame when the building is fused, through the mesh's placement matrix when
+   the modules are separate. */
 /* Continuous lattice (X, Z) of a placed module → world (x, z): through the mesh matrix when the modules are separate,
    through the lattice turned on the board when the building is fused. */
 function worldMapper(t, k, M) {
@@ -342,9 +376,11 @@ function deckFor(t, k, building, M = null) {
   const m = t.mod, n = N, y0 = m.an.bounds.ymin, [c, r] = cellOf(k), o = slotOrigin(c, r);
   const M0 = -4, W = n + 8, at = (x, z) => (x - M0) + W * (z - M0);
   let mask = new Uint8Array(W * W);
-  for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) if (m.occ[x + n * (y0 + n * z)] || m.occ[x + n * (y0 + 1 + n * z)]) mask[at(x, z)] = 1;
-  const grow = (src, rad, all) => { const out = new Uint8Array(src.length); for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { let n1 = 0, tot = 0; for (let dj = -rad; dj <= rad; dj++) for (let di = -rad; di <= rad; di++) { const I = i + di, J = j + dj; tot++; if (I >= 0 && J >= 0 && I < W && J < W && src[I + W * J]) n1++; } out[i + W * j] = all ? (n1 === tot ? 1 : 0) : (n1 ? 1 : 0); } return out; };
-  mask = grow(grow(mask, 3, false), 1, true);                                     // dilate 3, erode 1: +2 all round, gaps up to 6 voxels bridged
+  for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) for (let y = y0; y < Math.min(n, y0 + 3); y++) if (m.occ[x + n * (y + n * z)]) { mask[at(x, z)] = 1; break; }   // the footprint of the lowest storey — exactly, no growth
+  // enclosed holes filled (a courtyard in the footprint still gets its slab), the outline untouched
+  { const seen = new Uint8Array(W * W), st = []; for (let i = 0; i < W; i++) for (const j0 of [i, i + W * (W - 1), W * i, W * i + W - 1]) if (!mask[j0] && !seen[j0]) { seen[j0] = 1; st.push(j0); }
+    while (st.length) { const j = st.pop(), i = j % W, jj = (j / W) | 0; for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const I = i + di, J = jj + dj; if (I < 0 || J < 0 || I >= W || J >= W) continue; const q = I + W * J; if (!mask[q] && !seen[q]) { seen[q] = 1; st.push(q); } } }
+    for (let q = 0; q < W * W; q++) if (!mask[q] && !seen[q]) mask[q] = 1; }
   if (!mask.some(Boolean)) return;
   const toWorld = worldMapper(t, k, M);
   // the slab: the mask at twice the resolution, one cell thick, contoured and smoothed
@@ -562,7 +598,10 @@ function glide(before) {
 }
 function tileInfo(L, k) {                                                          // what a tile is and how it joins its neighbours, for the tooltip
   const t = A.boards[L][k]; if (!t) return '';
-  const face = sidesOf(t.mod, t.rot).open, lines = [`<b>${esc(t.mod.id)} ${esc(t.mod.name)}</b> <small>· ${esc(t.mod.typology)} · turned ${t.rot * 90}°</small>`, `${t.mod.use === 'lobby' ? 'opens' : face === 'E' ? 'opens' : '<i>opens</i>'} to the ${SIDE_NAME[face]}${t.mod.use !== 'lobby' && face !== 'E' ? ' <i>— turn it (R) to face the bay</i>' : ''}`];
+  const face = sidesOf(t.mod, t.rot).open, use = t.mod.use, clear = clearTo(L, k, face);
+  const want = use === 'office' ? ['E'] : use === 'social' || use === 'hybrid' ? ['S', 'W'] : null, right = !want || want.includes(face);
+  const lines = [`<b>${esc(t.mod.id)} ${esc(t.mod.name)}</b> <small>· ${esc(t.mod.typology)} · turned ${t.rot * 90}°</small>`,
+    `opens to the ${SIDE_NAME[face]}${LOOKS[face] && (use === 'social' || use === 'hybrid') ? ` — ${LOOKS[face]}` : ''}${!clear && want ? ' <i>— the view is blocked by a module in the way</i>' : ''}${!right ? ` <i>— turn it (R): ${use === 'office' ? 'workspaces face the bay' : 'gathering rooms and hybrids look south to the museums or west to the Arsht Center'}</i>` : ''}`];
   const names = { S: 'south', N: 'north', E: 'east (bay side)', W: 'west (street side)' };
   for (const pr of pairsOf(L)) {
     if (pr.a !== k && pr.b !== k) continue; const other = A.boards[L][pr.a === k ? pr.b : pr.a]; if (!other) continue;
@@ -582,7 +621,7 @@ function showTip(L, k, at) {                                                    
   R.tip.style.top = `${s.bottom + 10 + r.height > vh - 8 ? s.top - r.height - 10 : s.bottom + 10}px`;
 }
 function hideTip() { R.tip.hidden = true; }
-/* The building score: seven things the brief asks for, each 0–100, and goals ticked when they are met. */
+/* The building score: the rules of the brief, each 0–100, and goals ticked when they are met. */
 function score() {
   const mods = []; for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (t) mods.push({ t, k, L }); });
   if (!mods.length) return { total: 0, parts: [], goals: [] };
@@ -593,14 +632,45 @@ function score() {
   const around = m => { const out = []; for (const j of neighboursOf(m.k)) if (A.boards[m.L][j]) out.push(A.boards[m.L][j].mod.use); if (m.L > 0 && A.boards[m.L - 1][m.k]) out.push(A.boards[m.L - 1][m.k].mod.use); if (m.L < 2 && A.boards[m.L + 1][m.k]) out.push(A.boards[m.L + 1][m.k].mod.use); return out; };
   const withNb = mods.filter(m => around(m).length), mixed = withNb.length ? 100 * withNb.filter(m => around(m).some(u => u !== m.t.mod.use)).length / withNb.length : 100;
   const touching = m => around(m).length;
-  const others = mods.filter(m => m.t.mod.use !== 'lobby'), toBay = others.length ? 100 * others.filter(m => sidesOf(m.t.mod, m.t.rot).open === 'E').length / others.length : 100;
+  // the rules of the brief
+  const kinds = m => { const out = { lobby: 0, office: 0, social: 0, hybrid: 0, som: 0 }; for (const j of neighboursOf(m.k)) if (A.boards[m.L][j]) out[A.boards[m.L][j].mod.use]++; if (m.L > 0 && A.boards[m.L - 1][m.k]) out[A.boards[m.L - 1][m.k].mod.use]++; if (m.L < 2 && A.boards[m.L + 1][m.k]) out[A.boards[m.L + 1][m.k].mod.use]++; return out; };
+  const pairOK = m => { const n = kinds(m); return n.social >= 2 || (n.social >= 1 && n.hybrid >= 1); };          // two gathering rooms, or a gathering room and a hybrid
+  const off = mods.filter(m => m.t.mod.use === 'office'), hyb = mods.filter(m => m.t.mod.use === 'hybrid'), look = gat.concat(hyb);
+  const lobbyLinks = lob.length ? 100 * lob.filter(m => kinds(m).social >= 1).length / lob.length : 100;
+  const workAccess = off.length + hyb.length ? 100 * off.concat(hyb).filter(pairOK).length / (off.length + hyb.length) : 100;
+  const faces = m => sidesOf(m.t.mod, m.t.rot).open;
+  const bayView = m => faces(m) === 'E' && clearTo(m.L, m.k, 'E');
+  const toBay = off.length ? 100 * off.filter(bayView).length / off.length : 100;
+  const siteView = m => (faces(m) === 'S' || faces(m) === 'W') && clearTo(m.L, m.k, faces(m));
+  const toSite = look.length ? 100 * look.filter(siteView).length / look.length : 100;
   const shared = gat.length ? 100 * gat.filter(m => touching(m) >= 2).length / gat.length : 100;
   const floating = mods.filter(m => m.L > 0 && !A.boards[m.L - 1][m.k]).length, grounded = 100 * (1 - floating / mods.length);
-  let seams = 0, faces = 0; for (const m of mods) { seams += touching(m); faces += m.L > 0 ? 5 : 4; }
-  const compact = Math.min(100, 100 * seams / Math.max(1, faces) * 2.2);
-  const parts = [['Joined', joined, 'one building, not separate pieces'], ['Public edge', street, 'lobbies at ground on the street row or a causeway side'], ['Mixed', mixed, 'every module touching a module of another use — no block of one kind'], ['Shared rooms', shared, 'each gathering room touching two or more modules'], ['Open to the bay', toBay, 'every module but the lobbies turned so its open facade faces the bay (R turns a tile)'], ['Grounded', grounded, 'nothing floating'], ['Compact', compact, 'modules touching, not scattered']];
+  let seams = 0, facesN = 0; for (const m of mods) { seams += touching(m); facesN += m.L > 0 ? 5 : 4; }
+  const compact = Math.min(100, 100 * seams / Math.max(1, facesN) * 2.2);
+  const parts = [
+    ['Joined', joined, 'one building, not separate pieces'],
+    ['Public edge', street, 'lobbies at ground on the street row or a causeway side'],
+    ['Lobby links', lobbyLinks, 'every lobby touching at least one gathering room'],
+    ['Work access', workAccess, 'every workspace and hybrid reached through two gathering rooms, or a gathering room and a hybrid'],
+    ['To the bay', toBay, 'every workspace turned to the bay (R turns a tile) with nothing between it and the water on its floor'],
+    ['To the neighbours', toSite, 'every gathering room and hybrid turned to the museums (south) or the Arsht Center (west), with nothing in the way on its floor'],
+    ['Mixed', mixed, 'every module touching a module of another use — no block of one kind'],
+    ['Shared rooms', shared, 'each gathering room touching two or more modules'],
+    ['Grounded', grounded, 'nothing floating'],
+    ['Compact', compact, 'modules touching, not scattered']];
   const total = Math.round(parts.reduce((s, p) => s + p[1], 0) / parts.length);
-  const goals = [['One connected building', g.groups === 1], ['Every lobby on a public edge', lob.length > 0 && street === 100], ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100], ['Every gathering room is shared', gat.length > 0 && shared === 100], ['Workspaces and gathering rooms open to the bay', others.length > 0 && toBay === 100], ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15], ['Nothing floats', floating === 0]];
+  const goals = [
+    ['Ground floor raised 3 m above the flood (pilotis)', true],
+    ['One connected building', g.groups === 1],
+    ['Every lobby on a public edge', lob.length > 0 && street === 100],
+    ['Every lobby joins a gathering room', lob.length > 0 && lobbyLinks === 100],
+    ['Every workspace and hybrid reached through gathering rooms', off.length + hyb.length > 0 && workAccess === 100],
+    ['Every workspace faces the bay, view unobstructed', off.length > 0 && toBay === 100],
+    ['Gathering rooms and hybrids look to the museums or the Arsht Center', look.length > 0 && toSite === 100],
+    ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100],
+    ['Every gathering room is shared', gat.length > 0 && shared === 100],
+    ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15],
+    ['Nothing floats', floating === 0]];
   return { total, parts, goals, floating };
 }
 function renderScore() {
@@ -690,9 +760,9 @@ function planPicture() {                                                        
   const L = A.layer;
   A.boards[L].forEach((t, k) => { const [col, r] = cellOf(k), o = slotOrigin(col, r), x = pad + o.x * sx, y = pad - o.z * sx; g.strokeStyle = '#333'; g.strokeRect(x, y, SITE.slotX * sx, SITE.slotZ * sx); if (t) { g.drawImage(planOf(t.mod, t.rot), x + 2, y + 2, SITE.slotX * sx - 4, SITE.slotZ * sx - 4); g.fillStyle = '#fff'; g.font = '600 26px Poppins, sans-serif'; g.fillText(t.mod.id, x + 10, y + 34); } });
   for (const cn of connections(L)) { const [ca, ra] = cellOf(cn.a), o = slotOrigin(ca, ra); g.fillStyle = cn.levels.length ? '#e8e8e8' : '#6a6a6a'; if (cn.axis === 'x') g.fillRect(pad + (o.x + SITE.slotX) * sx, pad + (-o.z + SITE.slotZ / 2) * sx - 6, SITE.gapX * sx, 12); else g.fillRect(pad + (o.x + SITE.slotX / 2) * sx - 6, pad + (-o.z + SITE.slotZ) * sx, 12, SITE.gapZ * sx); }
-  g.fillStyle = '#b4b4b4'; g.font = '500 28px Poppins, sans-serif'; g.fillText('HERALD PLAZA · STREET · ACCESS FROM THE WEST', pad, pad - 30); g.fillText('BISCAYNE BAY · SURGE FROM THE EAST', pad, pad + SITE.width * sx + 48);
+  g.fillStyle = '#b4b4b4'; g.font = '500 28px Poppins, sans-serif'; g.fillText('HERALD PLAZA · STREET · ACCESS FROM THE WEST · ARSHT CENTER BEYOND', pad, pad - 30); g.fillText('BISCAYNE BAY · SURGE FROM THE EAST', pad, pad + SITE.width * sx + 48);
   g.save(); g.translate(pad - 36, pad + SITE.width * sx / 2); g.rotate(-Math.PI / 2); g.textAlign = 'center'; g.fillText('NORTH · VENETIAN CAUSEWAY', 0, 0); g.restore();
-  g.save(); g.translate(pad + SITE.length * sx + 48, pad + SITE.width * sx / 2); g.rotate(Math.PI / 2); g.textAlign = 'center'; g.fillText('SOUTH · MACARTHUR CAUSEWAY', 0, 0); g.restore();
+  g.save(); g.translate(pad + SITE.length * sx + 48, pad + SITE.width * sx / 2); g.rotate(Math.PI / 2); g.textAlign = 'center'; g.fillText('SOUTH · MACARTHUR CAUSEWAY · MUSEUM PARK, PAMM, FROST BEYOND', 0, 0); g.restore();
   g.fillStyle = '#f5f5f5'; g.font = '300 40px Poppins, sans-serif'; g.fillText(`VALVE HQ · ${LAYERS[L].toUpperCase()} · ${SITE.length} × ${SITE.width} M`, pad, c.height - 50);
   return c;
 }
@@ -719,9 +789,9 @@ const HTML = `
   </aside>
   <div class="as-main">
     <div class="as-boardwrap">
-      <div class="as-edge top"><span>Herald Plaza · street · access from the west</span><span class="seg" role="group" aria-label="Layer">${LAYERS.map((l, i) => `<button type="button" data-layer="${i}"${i === 0 ? ' class="on"' : ''}>${l.split(' ·')[0]}</button>`).join('')}</span></div>
-      <div class="as-boardrow"><div class="as-edge left">N · Venetian Causeway</div><div class="as-board" data-v="board" style="--cols:${SITE.cols};--rows:${SITE.rows}" tabindex="0" aria-label="Plan board"></div><div class="as-edge right">S · MacArthur Causeway</div></div>
-      <div class="as-edge bottom"><span>Biscayne Bay · surge from the east · the ground floods, so the ground layer stands 3 m up on pilotis</span></div>
+      <div class="as-edge top"><span>Herald Plaza · street · access from the west · the Arsht Center beyond</span><span class="seg" role="group" aria-label="Layer">${LAYERS.map((l, i) => `<button type="button" data-layer="${i}"${i === 0 ? ' class="on"' : ''}>${l.split(' ·')[0]}</button>`).join('')}</span></div>
+      <div class="as-boardrow"><div class="as-edge left">N · Venetian Causeway</div><div class="as-board" data-v="board" style="--cols:${SITE.cols};--rows:${SITE.rows}" tabindex="0" aria-label="Plan board"></div><div class="as-edge right">S · MacArthur Causeway · Museum Park, PAMM, Frost beyond</div></div>
+      <div class="as-edge bottom"><span>Biscayne Bay · surge from the east · the ground floods, so the ground floor stands 3 m up on pilotis · workspaces face the water</span></div>
     </div>
     <div class="as-under"><p class="status" data-v="stats"></p><div class="as-score" data-v="score"></div></div>
     <div class="as-viewer"><canvas data-v="canvas" aria-label="The building in 3D"></canvas><div class="as-compass">drag to orbit · scroll to zoom · <button type="button" data-view="street">street</button> <button type="button" data-view="bay">bay</button> <button type="button" data-view="aerial">aerial</button> <button type="button" data-view="plan">plan</button></div></div>
