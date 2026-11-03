@@ -338,25 +338,6 @@ function worldMapper(t, k, M) {
     return [o.x + (U - 1) * LAT, o.z - (V - 1) * LAT];
   };
 }
-/* Pillars under an overhang: a module above the ground stands on what is below it; wherever a 6 m grid point of its
-   footprint has nothing under it — no module in the bay at a lower layer with mass in that column, or one whose roof
-   is more than 1.5 m below — a column runs from the roof below (or the ground) up to its underside. */
-function pillarsFor(t, k, L, building, M = null) {
-  const n = N, me = sidesOf(t.mod, t.rot), o = slotOrigin(...cellOf(k)), toWorld = worldMapper(t, k, M), cols = [];
-  const yBottom = (L2, y) => (PODIUM_V + L2 * PITCH_V - 1 + y) * LAT, yTopOf = (L2, y) => (PODIUM_V + L2 * PITCH_V + y) * LAT;
-  for (let v = 0; v < n; v++) for (let u = 0; u < n; u++) {
-    const yl = me.low[u + n * v]; if (yl < 0) continue;
-    const [wx, wz] = toWorld(u + 0.5, v + 0.5), sx = Math.round((wx - o.x) / LAT - 0.5), sz = Math.round((o.z - wz) / LAT - 0.5);
-    if (((sx - 3) % 6 + 6) % 6 || ((sz - 3) % 6 + 6) % 6) continue;                                           // the 6 m grid of the bay
-    let support = 0;                                                                                            // the ground
-    for (let L2 = L - 1; L2 >= 0; L2--) { const t2 = A.boards[L2][k]; if (!t2) continue; const yt = sidesOf(t2.mod, t2.rot).top[u + n * v]; if (yt >= 0) { support = yTopOf(L2, yt); break; } }
-    const bottom = yBottom(L, yl); if (bottom - support > 1.5) cols.push([wx, wz, support, bottom]);
-  }
-  if (!cols.length) return;
-  const geo = new THREE.CylinderGeometry(0.35, 0.35, 1, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
-  cols.forEach(([x, z, y0, y1], i) => { tmp.position.set(x, (y0 + y1) / 2, z); tmp.scale.set(1, y1 - y0 + 0.2, 1); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
-  inst.castShadow = true; building.add(inst);
-}
 function deckFor(t, k, building, M = null) {
   const m = t.mod, n = N, y0 = m.an.bounds.ymin, [c, r] = cellOf(k), o = slotOrigin(c, r);
   const M0 = -4, W = n + 8, at = (x, z) => (x - M0) + W * (z - M0);
@@ -387,7 +368,7 @@ function deckFor(t, k, building, M = null) {
 /* Deck, pilotis and letter for a placed module — the parts both building modes share. */
 function furnish(t, k, L, tag, building, labels, M = null) {
   const [c, r] = cellOf(k);
-  if (L === 0) deckFor(t, k, building, M); else pillarsFor(t, k, L, building, M);
+  if (L === 0) deckFor(t, k, building, M);
   if (A.opts.labels) { const sp = label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'); sp.userData.slot = `${L}:${k}`; labels.add(sp); }
 }
 function cores(building) {                                                        // separate modules only: a stair-and-lift tower beside each stack; the first is the red stair (the fused body grows its own)
