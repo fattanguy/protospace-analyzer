@@ -117,26 +117,42 @@ function clearLayer(L) { A.boards[L] = A.boards[L].map(() => null); }
 function moveTile(L, from, to) { const b = A.boards[L]; if (b[to]) [b[from], b[to]] = [b[to], b[from]]; else { b[to] = b[from]; b[from] = null; } }
 function adjacent(a, b) { const [ca, ra] = cellOf(a), [cb, rb] = cellOf(b); return Math.abs(ca - cb) + Math.abs(ra - rb) === 1; }
 
-/* A sensible start, by the brief: lobbies as the public edge along the street (west row) at ground, gathering in the
-   middle of the ground floor, the cabal floors above with a gathering room in the middle of each; the seed varies it. */
+/* A sensible start, by the brief, with the uses mixed: the street row is lobbies and gathering rooms alternating along
+   the whole front (the public rooms), then the rest grows one module at a time — each goes where it touches modules of
+   other uses, never beside its own kind if it can help it; lobbies stay at ground on a public edge (the street row or a
+   causeway side), offices lean to the upper floors, gathering rooms to the middle of things, nothing floats and
+   everything touches. The seed varies the result. */
 function autoArrange(seed = Date.now() % 1000) {
   let sd = (seed * 9301 + 49297) % 233280; const rnd = () => (sd = (sd * 9301 + 49297) % 233280) / 233280;
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-  const by = u => A.modules.filter(m => m.use === u), L = by('lobby'), O = by('office'), G = by('social'), X = by('som');
+  const by = u => A.modules.filter(m => m.use === u), rot = () => (rnd() < 0.75 ? 1 : 3);
   for (let i = 0; i < 3; i++) clearLayer(i);
-  const rot = () => (rnd() < 0.75 ? 1 : 3);
-  // a compact block in the middle of the lot, every module touching a neighbour: the lobbies in a row along the street,
-  // the gathering rooms behind them, the cabal floors stacked on top with a gathering room among them
-  const c0 = 1 + Math.floor(rnd() * 1.999);                                           // the block starts at bay B or C
-  const lob = shuffle(L.slice()); lob.forEach((m, i) => { if (c0 + i < SITE.cols) place(0, idx(c0 + i, 0), m, rot()); });
-  const gat = shuffle(G.slice());
-  [1, 2, 3].forEach((dc, i) => { if (gat[i] && c0 + dc < SITE.cols) place(0, idx(c0 + dc, 1), gat[i], rot()); });
-  const ground = A.boards[0].map((t, k) => t ? k : -1).filter(k => k >= 0), offices = shuffle(O.concat(X).slice());
-  const over = ground.slice(); offices.forEach((m, i) => { if (over[i] != null) place(1, over[i], m, rot()); });
-  if (gat[3] && over[offices.length] != null) place(1, over[offices.length], gat[3], rot());
-  const level2 = A.boards[1].map((t, k) => t ? k : -1).filter(k => k >= 0), over3 = level2.filter(k => cellOf(k)[0] >= c0 + 1 && cellOf(k)[0] <= c0 + 3);
-  shuffle(O.slice()).slice(0, 3).forEach((m, i) => { if (over3[i] != null) place(2, over3[i], m, rot()); });
-  if (gat[4] && over3[3] != null) place(2, over3[3], gat[4], rot());
+  // the programme: every module once, two offices and a gathering room twice (the cabal floors), dealt out lobby · office · gathering in turn
+  const pools = { lobby: shuffle(by('lobby')), office: shuffle(by('office').concat(by('som'))), social: shuffle(by('social')) };
+  pools.office = pools.office.concat(pools.office.slice(0, 2)); pools.social = pools.social.concat(pools.social.slice(0, 1));   // the cabal floors: two offices and a gathering room again
+  // the street row first: lobbies and gathering rooms alternating along the whole front, starting with either
+  let u = rnd() < 0.5 ? 'lobby' : 'social';
+  for (let c = 0; c < SITE.cols; c++) { const m = pools[u].shift(); if (m) place(0, idx(c, 0), m, rot()); u = u === 'lobby' ? 'social' : 'lobby'; }
+  const queue = []; while (pools.lobby.length || pools.office.length || pools.social.length) for (const w of ['lobby', 'office', 'social']) if (pools[w].length) queue.push(pools[w].shift());
+  const publicEdge = (c, r) => r === 0 || c === 0 || c === SITE.cols - 1;
+  const usesAround = (L, k) => { const out = []; for (const j of neighboursOf(k)) if (A.boards[L][j]) out.push(A.boards[L][j].mod.use); if (L > 0 && A.boards[L - 1][k]) out.push(A.boards[L - 1][k].mod.use); if (L < 2 && A.boards[L + 1][k]) out.push(A.boards[L + 1][k].mod.use); return out; };
+  for (const m of queue) {
+    let best = null, bestS = -1e9;
+    for (let L = 0; L < 3; L++) for (let k = 0; k < SITE.cols * SITE.rows; k++) {
+      if (A.boards[L][k]) continue; const [c, r] = cellOf(k);
+      if (L > 0 && !A.boards[L - 1][k]) continue;                                                              // nothing floats
+      if (m.use === 'lobby' && (L > 0 || !publicEdge(c, r))) continue;                                         // lobbies at ground, on a public edge
+      const nb = usesAround(L, k); if (!nb.length) continue;                                                   // it must touch the building
+      let sc = 0; for (const u of nb) sc += u === m.use ? -2 : 2.5;                                            // mixed: other uses beside it, its own kind kept apart
+      sc += Math.min(nb.length, 3) * 0.6 + (L > 0 && nb.length > 1 ? 2.2 : 0);                                 // compact: upstairs, beside another module rather than alone on a roof
+      if (m.use === 'office') sc += L * 1.4 - (L === 0 ? 1 : 0);                                               // offices up where the views are
+      if (m.use === 'social') sc += (r === 1 ? 1 : 0) + (L === 0 ? 0.4 : 0);                                    // gathering rooms in the middle of things
+      if (L === 0 && r === 2) sc -= 0.6;                                                                       // the bay row fills last
+      sc += rnd() * 1.6;
+      if (sc > bestS) { bestS = sc; best = { L, k }; }
+    }
+    if (best) place(best.L, best.k, m, rot());
+  }
   A.sel = null; renderBoard(); build();
 }
 /* All fifteen catalogue modules on one floor: the other layers are emptied and the ground floor gets a 5 × 3 block centred on
@@ -234,6 +250,7 @@ function latticeToLocal(m, x, y, z) {                                           
   return [(x + 0.5) * LAT + m.shift[0], (y + 0.5) * LAT + m.shift[1], -(z + 0.5) * LAT + m.shift[2]];
 }
 const FUSED = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+const CORE_PID = 30000;                                                             // grid labels from here up are cores (the first the red stair), not modules
 function tintOf(use) { return '#' + new THREE.Color(0xece8e1).lerp(new THREE.Color(USE[use] ? USE[use].c : '#888'), 0.5).getHexString(); }
 function clearBuilding() {
   const { building, labels } = A.three;
@@ -252,7 +269,7 @@ function furnish(t, k, L, tag, building, labels) {
   }
   if (A.opts.labels) { const sp = label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'); sp.userData.slot = `${L}:${k}`; labels.add(sp); }
 }
-function cores(building) {                                                        // wherever modules stack, a stair-and-lift tower at the slot's north-west corner; the first is the red stair
+function cores(building) {                                                        // separate modules only: a stair-and-lift tower beside each stack; the first is the red stair (the fused body grows its own)
   if (!A.opts.cores) return;
   stacks().forEach((s, i) => {
     const [c, r] = cellOf(s.k), ctr = slotCentre(c, r), h = PODIUM + s.top * PITCH + MOD_H * 0.8;   // inside the body, at the centre of the stack
@@ -276,8 +293,8 @@ function buildFused() {
     for (const [x, z] of [[b.xmin, b.zmin], [b.xmax, b.zmin], [b.xmin, b.zmax], [b.xmax, b.zmax]]) { const [u, v] = latToSlot(x, z, t.rot); minX = Math.min(minX, gx0 + u - 1); maxX = Math.max(maxX, gx0 + u - 1); minZ = Math.min(minZ, gz0 + v - 1); maxZ = Math.max(maxZ, gz0 + v - 1); }
     minY = Math.min(minY, gy0 + b.ymin); maxY = Math.max(maxY, gy0 + b.ymax);
   });
-  const OX = Math.max(0, minX - 2), OY = Math.max(0, minY - 2), OZ = Math.max(0, minZ - 2);
-  const DX = maxX < 0 ? 1 : Math.min(GX, maxX + 3) - OX, DY = maxX < 0 ? 1 : Math.min(GY, maxY + 3) - OY, DZ = maxX < 0 ? 1 : Math.min(GZ, maxZ + 3) - OZ;
+  const OX = Math.max(0, minX - 2), OY = 0, OZ = Math.max(0, minZ - 2);                                         // y from the ground, so the cores can reach it
+  const DX = maxX < 0 ? 1 : Math.min(GX, maxX + 3) - OX, DY = maxX < 0 ? 1 : Math.min(GY, maxY + 6) - OY, DZ = maxX < 0 ? 1 : Math.min(GZ, maxZ + 3) - OZ;
   const occ = new Uint8Array(DX * DY * DZ), lab = new Int16Array(DX * DY * DZ);
   const gid = (x, y, z) => x + DX * (y + DY * z);
   const placed = [], bySlot = {};                                                  // placements with their grid bounding boxes
@@ -314,11 +331,36 @@ function buildFused() {
     if (east && east.bb.maxX >= 0) { const cn = cns[P.L].find(x => x.a === P.k && x.b === P.k + SITE.cols); const through = seam(P, east, 2); pairs.push({ L: P.L, a: P.k, b: P.k + SITE.cols, axis: 'z', levels: cn ? cn.levels : [], through, joined: through }); }
     if (up && up.bb.maxX >= 0) seam(P, up, 1);
   }
+  // the cores, part of the body: wherever modules stack (or one sits above the ground), a stair-and-lift shaft is stamped
+  // into the grid where the stack is most solid — it fills the voids and the gaps between floors on its way from the
+  // ground to a bulkhead over the top roof, and the surface flows around it; the first is the red stair
+  let coreCount = 0;
+  if (A.opts.cores && placed.length) stacks().forEach((st, i) => {
+    const [c, r] = cellOf(st.k), { gx0, gz0 } = gridBase(c, r, 0), x0 = gx0 - 1 - OX, z0 = gz0 - 1 - OZ, W = 6, D = 5;
+    const colN = new Int32Array(SLOT_V * SLOT_V), colTop = new Int32Array(SLOT_V * SLOT_V);                  // solid per column of the bay, and its top
+    for (let dz = 0; dz < SLOT_V; dz++) for (let dx = 0; dx < SLOT_V; dx++) {
+      const x = x0 + dx, z = z0 + dz; if (x < 0 || z < 0 || x >= DX || z >= DZ) continue; let n = 0, top = -1;
+      for (let y = 0; y < DY; y++) { const j = gid(x, y, z); if (occ[j] && lab[j] > 0 && lab[j] < CORE_PID) { n++; top = y; } }
+      colN[dx + SLOT_V * dz] = n; colTop[dx + SLOT_V * dz] = top;
+    }
+    let best = null, bestS = -1e9;
+    for (let dz = 2; dz + D <= SLOT_V - 2; dz++) for (let dx = 2; dx + W <= SLOT_V - 2; dx++) {
+      let n = 0, top = -1; for (let v = 0; v < D; v++) for (let u = 0; u < W; u++) { const q = dx + u + SLOT_V * (dz + v); n += colN[q]; if (colTop[q] > top) top = colTop[q]; }
+      const sc = n - 0.8 * (Math.abs(dx + W / 2 - SLOT_V / 2) + Math.abs(dz + D / 2 - SLOT_V / 2));          // the most solid column, near the middle of the bay
+      if (top >= 0 && sc > bestS) { bestS = sc; best = { dx, dz, top }; }
+    }
+    if (!best) return;
+    const pid = CORE_PID + (coreCount++ ? 1 : 0), yTop = Math.min(DY - 3, best.top + 3);
+    for (let y = 0; y <= yTop; y++) for (let v = 0; v < D; v++) for (let u = 0; u < W; u++) {
+      const x = x0 + best.dx + u, z = z0 + best.dz + v; if (x < 0 || z < 0 || x >= DX || z >= DZ) continue;
+      const j = gid(x, y, z); if (!occ[j]) { occ[j] = 1; lab[j] = pid; }                                       // only where the modules are not: the shaft shows in voids, gaps and above the roof
+    }
+  });
   const links = pairs.map(pr => ({ L: pr.L, through: pr.through }));
   A.pairs = pairs;
   // the surface
   if (placed.length) {
-    const colorOf = pid => { const P = placed[pid - 1]; return P ? tintOf(P.t.mod.use) : '#e9e5de'; };
+    const colorOf = pid => { if (pid >= CORE_PID) return pid === CORE_PID ? '#c62828' : '#3a3a3a'; const P = placed[pid - 1]; return P ? tintOf(P.t.mod.use) : '#e9e5de'; };
     const g = fusedGeometry(occ, lab, DX, DY, DZ, colorOf, 10);
     const P = g.getAttribute('position'), arr = P.array;
     for (let i = 0; i < P.count; i++) { arr[i * 3] = gridX(arr[i * 3] + OX); arr[i * 3 + 1] = gridY(arr[i * 3 + 1] + OY); arr[i * 3 + 2] = gridZ(arr[i * 3 + 2] + OZ); }
@@ -330,7 +372,6 @@ function buildFused() {
     const { t, k, L } = P;
     furnish(t, k, L, P.tag, building, labels);
   }
-  cores(building);
   A.three.callouts = callouts; A.three.links = links; A.three.placed = placed;
   applyHighlight();
 }
@@ -448,22 +489,24 @@ function showTip(L, k, at) {                                                    
   R.tip.style.top = `${s.bottom + 10 + r.height > vh - 8 ? s.top - r.height - 10 : s.bottom + 10}px`;
 }
 function hideTip() { R.tip.hidden = true; }
-/* The building score: five things the brief asks for, each 0–100, and goals ticked when they are met. */
+/* The building score: six things the brief asks for, each 0–100, and goals ticked when they are met. */
 function score() {
   const mods = []; for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (t) mods.push({ t, k, L }); });
   if (!mods.length) return { total: 0, parts: [], goals: [] };
-  const g = connectedGroups(), lob = mods.filter(m => m.t.mod.use === 'lobby'), off = mods.filter(m => m.t.mod.use === 'office'), gat = mods.filter(m => m.t.mod.use === 'social');
+  const g = connectedGroups(), lob = mods.filter(m => m.t.mod.use === 'lobby'), gat = mods.filter(m => m.t.mod.use === 'social');
   const joined = 100 * (1 - (g.groups - 1) / Math.max(1, mods.length - 1));
-  const street = lob.length ? 100 * lob.filter(m => m.L === 0 && cellOf(m.k)[1] === 0).length / lob.length : 100;
-  const flood = off.length ? 100 * off.filter(m => m.L > 0).length / off.length : 100;
-  const touching = m => { let n = 0; for (const j of neighboursOf(m.k)) if (A.boards[m.L][j]) n++; if (m.L > 0 && A.boards[m.L - 1][m.k]) n++; if (m.L < 2 && A.boards[m.L + 1][m.k]) n++; return n; };
+  const onEdge = m => { const [c, r] = cellOf(m.k); return m.L === 0 && (r === 0 || c === 0 || c === SITE.cols - 1); };
+  const street = lob.length ? 100 * lob.filter(onEdge).length / lob.length : 100;
+  const around = m => { const out = []; for (const j of neighboursOf(m.k)) if (A.boards[m.L][j]) out.push(A.boards[m.L][j].mod.use); if (m.L > 0 && A.boards[m.L - 1][m.k]) out.push(A.boards[m.L - 1][m.k].mod.use); if (m.L < 2 && A.boards[m.L + 1][m.k]) out.push(A.boards[m.L + 1][m.k].mod.use); return out; };
+  const withNb = mods.filter(m => around(m).length), mixed = withNb.length ? 100 * withNb.filter(m => around(m).some(u => u !== m.t.mod.use)).length / withNb.length : 100;
+  const touching = m => around(m).length;
   const shared = gat.length ? 100 * gat.filter(m => touching(m) >= 2).length / gat.length : 100;
   const floating = mods.filter(m => m.L > 0 && !A.boards[m.L - 1][m.k]).length, grounded = 100 * (1 - floating / mods.length);
   let seams = 0, faces = 0; for (const m of mods) { seams += touching(m); faces += m.L > 0 ? 5 : 4; }
   const compact = Math.min(100, 100 * seams / Math.max(1, faces) * 2.2);
-  const parts = [['Joined', joined, 'one building, not separate pieces'], ['Street edge', street, 'lobbies in the west row, at ground'], ['Above the flood', flood, 'offices a level up'], ['Shared rooms', shared, 'each gathering room touching two or more modules'], ['Grounded', grounded, 'nothing floating'], ['Compact', compact, 'modules touching, not scattered']];
+  const parts = [['Joined', joined, 'one building, not separate pieces'], ['Public edge', street, 'lobbies at ground on the street row or a causeway side'], ['Mixed', mixed, 'every module touching a module of another use — no block of one kind'], ['Shared rooms', shared, 'each gathering room touching two or more modules'], ['Grounded', grounded, 'nothing floating'], ['Compact', compact, 'modules touching, not scattered']];
   const total = Math.round(parts.reduce((s, p) => s + p[1], 0) / parts.length);
-  const goals = [['One connected building', g.groups === 1], ['Every lobby lines the street', lob.length > 0 && street === 100], ['No office on the flooding ground', off.length > 0 && flood === 100], ['Every gathering room is shared', gat.length > 0 && shared === 100], ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15], ['Nothing floats', floating === 0]];
+  const goals = [['One connected building', g.groups === 1], ['Every lobby on a public edge', lob.length > 0 && street === 100], ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100], ['Every gathering room is shared', gat.length > 0 && shared === 100], ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15], ['Nothing floats', floating === 0]];
   return { total, parts, goals, floating };
 }
 function renderScore() {
@@ -575,7 +618,7 @@ const HTML = `
     <h2 class="eyebrow" style="margin-top:16px">The building</h2>
     <label class="chk"><input type="checkbox" data-opt="fuse" checked> Fuse the modules — they morph into each other across the seams</label>
     <label class="chk"><input type="checkbox" data-opt="walls"> Garden walls (separate modules only)</label>
-    <label class="chk"><input type="checkbox" data-opt="cores" checked> Cores where modules stack</label>
+    <label class="chk"><input type="checkbox" data-opt="cores" checked> Cores where modules stack, grown into the body</label>
     <label class="chk"><input type="checkbox" data-opt="labels" checked> Letters over the modules</label>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="png">Picture · PNG</button><button type="button" class="btn quiet" data-v="plan">Plan · PNG</button><button type="button" class="btn quiet" data-v="glb">Model · GLB</button><button type="button" class="btn quiet" data-v="obj">Model · OBJ</button></div>
     <p class="hint" data-v="linkNote"></p>
