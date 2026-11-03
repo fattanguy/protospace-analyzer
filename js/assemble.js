@@ -520,13 +520,13 @@ function slide(L, k) {
   const b = A.boards[L], empties = neighboursOf(k).filter(j => !b[j]); if (empties.length !== 1) return -1;
   pushHistory(); moveTile(L, k, empties[0]); return empties[0];
 }
-function scramble(L, n = 14) {                                                      // a run of random legal slides, one every quarter second
+function scramble(L, n = 10) {                                                      // the modules change places among themselves — the footprint of the building stays, nothing drifts apart
   if (A.scrambling) return; A.scrambling = true; pushHistory(); A.sel = null;
   const step = i => {
-    const b = A.boards[L], movable = b.map((t, k) => t && neighboursOf(k).some(j => !b[j]) ? k : -1).filter(k => k >= 0);
-    if (i >= n || !movable.length) { A.scrambling = false; build(); return; }
-    const k = movable[Math.floor(Math.random() * movable.length)], empties = neighboursOf(k).filter(j => !b[j]);
-    moveTile(L, k, empties[Math.floor(Math.random() * empties.length)]); renderBoard(); setTimeout(() => step(i + 1), 240);
+    const b = A.boards[L], filled = b.map((t, k) => t ? k : -1).filter(k => k >= 0);
+    if (i >= n || filled.length < 2) { A.scrambling = false; build(); return; }
+    const a = filled[Math.floor(Math.random() * filled.length)]; let c = filled[Math.floor(Math.random() * filled.length)]; if (c === a) c = filled[(filled.indexOf(a) + 1) % filled.length];
+    moveTile(L, a, c); renderBoard(); setTimeout(() => step(i + 1), 240);         // moveTile swaps two occupied bays
   };
   step(0);
 }
@@ -687,7 +687,7 @@ const HTML = `
     <div class="as-palhead"><select data-v="cat" class="as-cat" aria-label="Kind of space"></select><span class="hint" data-v="catNote"></span></div>
     <div class="as-palette" data-v="palette"></div>
     <h2 class="eyebrow" style="margin-top:16px">The board</h2>
-    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn quiet" data-v="shuffle">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
+    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn quiet" data-v="shuffle" title="The modules on this layer change places among themselves; the footprint stays">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="undo" title="Ctrl/⌘ Z">Undo</button><button type="button" class="btn quiet" data-v="redo" title="Ctrl/⌘ Shift Z">Redo</button><button type="button" class="btn quiet" data-v="remove" title="Delete, or drag a tile off the board">Remove</button></div>
     <p class="hint">It is a sliding puzzle: click a tile with one empty bay beside it and it slides there; drag any tile to any bay (onto another tile to swap); drag it off the board to take it out; arrow keys slide the selected tile, R (or a double-click) turns it, 1 2 3 change layer. Three layers: ground on pilotis, two above — a tile on an upper layer needs a module below it.</p>
     <h2 class="eyebrow" style="margin-top:16px">The building</h2>
