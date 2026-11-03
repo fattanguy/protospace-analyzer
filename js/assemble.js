@@ -151,10 +151,13 @@ function autoArrange(seed = Date.now() % 1000) {
   if (gat[4] && over3[3] != null) place(2, over3[3], gat[4], rot());
   A.sel = null; renderBoard(); build();
 }
-function shuffleLayer(L) {
-  const tiles = A.boards[L].filter(Boolean), empties = A.boards[L].map((_, k) => k);
-  for (let i = empties.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [empties[i], empties[j]] = [empties[j], empties[i]]; }
-  clearLayer(L); tiles.forEach((t, i) => { A.boards[L][empties[i]] = t; });
+/* All fifteen catalogue modules on one floor: the other layers are emptied and the ground floor gets a 5 × 3 block centred on
+   the lot — the lobbies along the street row, the gathering rooms in the middle, the offices on the bay side — with the
+   end bays empty, so there is room to slide. */
+function fillFloor(L = 0) {
+  const by = u => A.modules.filter(m => m.use === u), rows = [by('lobby'), by('social'), by('office')];
+  for (let i = 0; i < 3; i++) clearLayer(i); A.layer = L;
+  rows.forEach((ms, r) => { const c0 = Math.max(0, Math.floor((SITE.cols - ms.length) / 2)); ms.forEach((m, i) => { if (c0 + i < SITE.cols) place(L, idx(c0 + i, r), m, 1); }); });
   A.sel = null; renderBoard(); build();
 }
 
@@ -598,7 +601,7 @@ const HTML = `
     <p class="hint">Drag a module onto a bay (or click it, then a bay). Fifteen from the catalogue; tiles sent from the Explorer (“Build with it”) appear here too.</p>
     <div class="as-palette" data-v="palette"></div>
     <h2 class="eyebrow" style="margin-top:16px">The board</h2>
-    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn quiet" data-v="shuffle">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
+    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn" data-v="fill" title="One floor with all fifteen modules: lobbies on the street row, gathering rooms in the middle, offices on the bay side, six empty bays to slide into">All 15 on one floor</button><button type="button" class="btn quiet" data-v="shuffle">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="undo" title="Ctrl/⌘ Z">Undo</button><button type="button" class="btn quiet" data-v="redo" title="Ctrl/⌘ Shift Z">Redo</button><button type="button" class="btn quiet" data-v="rotate" title="R, or double-click a tile">Turn 90°</button><button type="button" class="btn quiet" data-v="remove" title="Delete, or drag a tile off the board">Remove</button></div>
     <p class="hint">It is a sliding puzzle: click a tile with one empty bay beside it and it slides there; drag any tile to any bay (onto another tile to swap); drag it off the board to take it out; arrow keys slide the selected tile, R turns it, 1 2 3 change layer. Three layers: ground on pilotis, two above — a tile on an upper layer needs a module below it.</p>
     <h2 class="eyebrow" style="margin-top:16px">The building</h2>
@@ -686,6 +689,7 @@ export function mount(root) {
   $$('[data-layer]', root).forEach(bt => bt.addEventListener('click', () => { A.layer = +bt.dataset.layer; A.sel = null; renderBoard(false); applyHighlight(); }));
   $$('[data-view]', root).forEach(bt => bt.addEventListener('click', () => setView(bt.dataset.view)));
   R.auto.addEventListener('click', () => { pushHistory(); autoArrange(); });
+  R.fill.addEventListener('click', () => { pushHistory(); fillFloor(0); setTimeout(() => setView('aerial'), 200); });
   R.shuffle.addEventListener('click', () => scramble(A.layer));
   R.clear.addEventListener('click', () => { pushHistory(); clearLayer(A.layer); A.sel = null; renderBoard(); build(); });
   R.undo.addEventListener('click', undo); R.redo.addEventListener('click', redo);
