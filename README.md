@@ -62,8 +62,10 @@ Live at the Vercel deployment of this repository.
   tiles (the U-matrix), criteria match. Explore mode spreads designs out, Cluster groups them.
 - **Assemble** — the fifteen spaces as modules of an office for Valve on the One Herald
   Plaza lot: a sliding-tile plan board (7 × 3 bays, three layers) and the building that follows
-  it in 3D — modules on pilotis, bridges where neighbours share a floor height, garden walls
-  where they do not, strip windows in the thin walls, cores where modules stack, one red stair —
+  it in 3D as one fused body — modules on pilotis morphing into their neighbours across 3 m
+  seams and into the module stacked above (`js/fuse.js`: one voxel grid, a morph of the facing
+  sections at every seam, surface nets, Taubin smoothing), a bridge only where floors meet but
+  no mass does, strip windows in the thin walls, cores where modules stack, one red stair —
   with a callout per module of what it is and where it came from (`js/assemble.js`). Any
   Explorer tile can be sent over with *Build with it*.
 

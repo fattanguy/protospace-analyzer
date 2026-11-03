@@ -6,11 +6,11 @@
    layer stands on pilotis 3 m up and the levels above hold the cabals; lobbies make the public edge on the west,
    offices the cabal floors, gathering spaces the rooms for the whole company; one red stair ties it all together.
 
-   Plan game: the lot is a board of 7 × 3 slots (one module bay each, 31 × 27 m, with 5.5 / 9.5 m gaps for bridges).
+   Plan game: the lot is a board of 7 × 3 slots (one module bay each, 31 × 31 m, with a 3 m seam between bays).
    Modules are tiles — their roof plans — that slide into empty slots; a tile can be turned; the board has three layers
-   (ground, level 2, level 3). The 3D building follows the board: modules in their slots, bridges across the gaps
-   wherever two neighbours have floors at the same height, a garden wall where they do not, windows cut in the thin
-   walls, a core wherever modules stack, and the red stair. Every module carries a callout of what it is and where
+   (ground, level 2, level 3). The 3D building follows the board, fused into one surface: across every seam the two
+   neighbours morph into each other (js/fuse.js), a bridge is added only where floors meet but no mass does, windows
+   are cut in the thin walls, a core rises wherever modules stack, and the red stair. Every module carries a callout of what it is and where
    it came from (animation, frame, bay — or the Explorer map and tile it was taken from).
 
    mount(root) → { show, addModule({ name, occ, N, note, use }) } ; the Explorer sends tiles with addModule. */
@@ -22,23 +22,31 @@ import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { voxelize } from './voxelize.js';
 import { organicGeometry } from './isosurface.js';
+import { fusedGeometry, morphSeam } from './fuse.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ------------------------------------------------------------------ the site and the board
-export const SITE = { length: 250, width: 100, cols: 7, rows: 3, slotX: 31, slotZ: 27 };   // x runs north → south, z runs west → east (negative)
-SITE.gapX = (SITE.length - SITE.cols * SITE.slotX) / (SITE.cols - 1);                      // 5.5 m between bays along the lot
-SITE.gapZ = (SITE.width - SITE.rows * SITE.slotZ) / (SITE.rows - 1);                        // 9.5 m between the three rows
-const PODIUM = 3, PITCH = 20, MOD_H = 19, N = 32, LAT = 31 / 30;                           // pilotis height · layer pitch · module height · lattice · metres per voxel
+const N = 32, LAT = 31 / 30, SLOT_V = 30, GAP_V = 3, PITCH_V = 21, PODIUM_V = 3, MARGIN_V = 2;   // lattice · metres per voxel · bay, seam, layer pitch, pilotis, grid margin (voxels)
+export const SITE = { length: 250, width: 100, cols: 7, rows: 3, slotX: SLOT_V * LAT, slotZ: SLOT_V * LAT, gapX: GAP_V * LAT, gapZ: GAP_V * LAT };   // x runs north → south, z runs west → east (negative)
+SITE.boardX = SITE.cols * SITE.slotX + (SITE.cols - 1) * SITE.gapX; SITE.boardZ = SITE.rows * SITE.slotZ + (SITE.rows - 1) * SITE.gapZ;
+SITE.x0 = (SITE.length - SITE.boardX) / 2; SITE.z0 = (SITE.width - SITE.boardZ) / 2;                                   // the board sits centred on the lot
+const PODIUM = PODIUM_V * LAT, PITCH = PITCH_V * LAT, MOD_H = 19;                                                          // pilotis height · layer pitch · module height (m)
 const LAYERS = ['Ground · on pilotis', 'Level 2', 'Level 3'];
 const USE = { lobby: { name: 'Lobby', c: '#6d8f98' }, office: { name: 'Office', c: '#c0994f' }, social: { name: 'Gathering', c: '#b4584a' }, som: { name: 'Explorer tile', c: '#7b7aa3' } };
-const slotOrigin = (c, r) => ({ x: c * (SITE.slotX + SITE.gapX), z: -r * (SITE.slotZ + SITE.gapZ) });   // the slot's north-west corner
+const slotOrigin = (c, r) => ({ x: SITE.x0 + c * (SITE.slotX + SITE.gapX), z: -(SITE.z0 + r * (SITE.slotZ + SITE.gapZ)) });   // the slot's north-west corner
 const slotCentre = (c, r) => { const o = slotOrigin(c, r); return { x: o.x + SITE.slotX / 2, z: o.z - SITE.slotZ / 2 }; };
+/* A module's lattice footprint turned on the board: (x, z) of the 32 × 32 lattice → (u, v), u along the lot (south = +u), v across it (east = +v). */
+const latToSlot = (x, z, rot) => [[x, z], [N - 1 - z, x], [N - 1 - x, N - 1 - z], [z, N - 1 - x]][rot & 3];
+// the building's voxel grid: the board plus a margin all round; grid (gx, gy, gz) ↔ world
+const GX = 2 * MARGIN_V + SITE.cols * SLOT_V + (SITE.cols - 1) * GAP_V, GZ = 2 * MARGIN_V + SITE.rows * SLOT_V + (SITE.rows - 1) * GAP_V, GY = PODIUM_V + 3 * PITCH_V + 2;
+const gridX = gx => SITE.x0 + (gx - MARGIN_V + 0.5) * LAT, gridY = gy => (gy + 0.5) * LAT, gridZ = gz => -(SITE.z0 + (gz - MARGIN_V + 0.5) * LAT);   // voxel centres
+const gridBase = (c, r, L) => ({ gx0: MARGIN_V + c * (SLOT_V + GAP_V), gz0: MARGIN_V + r * (SLOT_V + GAP_V), gy0: PODIUM_V + L * PITCH_V - 1 });   // lattice (u, v, y) → (gx0 + u − 1, gy0 + y, gz0 + v − 1)
 
 const A = {
   modules: [], boards: [[], [], []], layer: 0, sel: null, pick: null, custom: 0,
-  three: null, ready: false, opts: { bridges: true, walls: true, windows: true, cores: true, labels: true },
+  three: null, ready: false, pairs: null, opts: { fuse: true, bridges: true, walls: false, windows: true, cores: true, labels: true },
 };
 for (let L = 0; L < 3; L++) A.boards[L] = Array.from({ length: SITE.cols * SITE.rows }, () => null);   // { mod, rot }
 let R = {};
@@ -47,9 +55,9 @@ let R = {};
 function analyse(occ, n) {                                                       // floors, roof heights, edge ports and window panels of a voxel solid
   const at = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < n && y < n && z < n && occ[x + n * (y + n * z)];
   const roof = new Int8Array(n * n).fill(-1), floors = [];                          // roof[x + n z] = top voxel; floors = [x, y, z] standable cells
-  let xmin = n, xmax = 0, zmin = n, zmax = 0, cells = 0;
+  let xmin = n, xmax = 0, zmin = n, zmax = 0, ymin = n, ymax = 0, cells = 0;
   for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-    if (at(x, y, z)) { cells++; if (y > roof[x + n * z]) roof[x + n * z] = y; if (x < xmin) xmin = x; if (x > xmax) xmax = x; if (z < zmin) zmin = z; if (z > zmax) zmax = z; }
+    if (at(x, y, z)) { cells++; if (y > roof[x + n * z]) roof[x + n * z] = y; if (x < xmin) xmin = x; if (x > xmax) xmax = x; if (z < zmin) zmin = z; if (z > zmax) zmax = z; if (y < ymin) ymin = y; if (y > ymax) ymax = y; }
     else if (y > 0 && at(x, y - 1, z) && !at(x, y + 1, z) && !at(x, y + 2, z)) floors.push([x, y, z]);
   }
   // ports: floor cells within three voxels of each side of the solid, per level: side → { level: [along-coordinates] }
@@ -71,7 +79,7 @@ function analyse(occ, n) {                                                      
       panels.push([x, y, z, side]);
     }
   }
-  return { roof, floors, ports, panels, bounds: { xmin, xmax, zmin, zmax }, cells };
+  return { roof, floors, ports, panels, bounds: { xmin, xmax, zmin, zmax, ymin, ymax }, cells };
 }
 async function loadBuiltins() {
   const index = await (await fetch('assets/spaces/index.json')).json(), loader = new GLTFLoader();
@@ -99,7 +107,7 @@ function planOf(m, rot) {
   const { roof, floors } = m.an, col = USE[m.use] ? USE[m.use].c : '#888';
   const n = N, cell = S / n;
   // lattice (x across, z deep: z = 0 at the front) → tile pixels with the rotation; north is up on the tile
-  const map = (x, z) => { const p = [[x, z], [n - 1 - z, x], [n - 1 - x, n - 1 - z], [z, n - 1 - x]][rot % 4]; return [p[0] * cell, p[1] * cell]; };
+  const map = (x, z) => { const p = latToSlot(x, z, rot); return [p[0] * cell, p[1] * cell]; };
   g.fillStyle = '#0a0a0a'; g.fillRect(0, 0, S, S);
   let top = 1; for (let i = 0; i < roof.length; i++) if (roof[i] > top) top = roof[i];
   for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) {
@@ -124,24 +132,23 @@ function adjacent(a, b) { const [ca, ra] = cellOf(a), [cb, rb] = cellOf(b); retu
 /* A sensible start, by the brief: lobbies as the public edge along the street (west row) at ground, gathering in the
    middle of the ground floor, the cabal floors above with a gathering room in the middle of each; the seed varies it. */
 function autoArrange(seed = Date.now() % 1000) {
-  let s = (seed * 9301 + 49297) % 233280; const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+  let sd = (seed * 9301 + 49297) % 233280; const rnd = () => (sd = (sd * 9301 + 49297) % 233280) / 233280;
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const by = u => A.modules.filter(m => m.use === u), L = by('lobby'), O = by('office'), G = by('social'), X = by('som');
   for (let i = 0; i < 3; i++) clearLayer(i);
-  const rot = () => (rnd() < 0.7 ? 1 : 3);
-  // ground: five lobbies along the west row (every other bay, so the street edge breathes), gathering in the middle row
-  const westCols = shuffle([0, 1, 2, 3, 4, 5, 6]).slice(0, Math.min(5, L.length)).sort((a, b) => a - b);
-  shuffle(L.slice()).forEach((m, i) => place(0, idx(westCols[i], 0), m, rot()));
-  const midCols = shuffle([1, 2, 3, 4, 5]).slice(0, Math.min(3, G.length));
-  shuffle(G.slice()).slice(0, 3).forEach((m, i) => place(0, idx(midCols[i], 1), m, rot()));
-  // level 2: offices stacked on the ground modules (never floating), a gathering room among them; level 3 lighter still
-  const ground = A.boards[0].map((t, k) => t ? k : -1).filter(k => k >= 0);
-  const over = shuffle(ground.slice()), offices = shuffle(O.concat(X).slice());
-  offices.forEach((m, i) => { if (over[i] != null) place(1, over[i], m, rot()); });
-  if (G[3] && over[offices.length] != null) place(1, over[offices.length], G[3], rot());
-  const level2 = A.boards[1].map((t, k) => t ? k : -1).filter(k => k >= 0), over3 = shuffle(level2.slice());
+  const rot = () => (rnd() < 0.75 ? 1 : 3);
+  // a compact block in the middle of the lot, every module touching a neighbour: the lobbies in a row along the street,
+  // the gathering rooms behind them, the cabal floors stacked on top with a gathering room among them
+  const c0 = 1 + Math.floor(rnd() * 1.999);                                           // the block starts at bay B or C
+  const lob = shuffle(L.slice()); lob.forEach((m, i) => { if (c0 + i < SITE.cols) place(0, idx(c0 + i, 0), m, rot()); });
+  const gat = shuffle(G.slice());
+  [1, 2, 3].forEach((dc, i) => { if (gat[i] && c0 + dc < SITE.cols) place(0, idx(c0 + dc, 1), gat[i], rot()); });
+  const ground = A.boards[0].map((t, k) => t ? k : -1).filter(k => k >= 0), offices = shuffle(O.concat(X).slice());
+  const over = ground.slice(); offices.forEach((m, i) => { if (over[i] != null) place(1, over[i], m, rot()); });
+  if (gat[3] && over[offices.length] != null) place(1, over[offices.length], gat[3], rot());
+  const level2 = A.boards[1].map((t, k) => t ? k : -1).filter(k => k >= 0), over3 = level2.filter(k => cellOf(k)[0] >= c0 + 1 && cellOf(k)[0] <= c0 + 3);
   shuffle(O.slice()).slice(0, 3).forEach((m, i) => { if (over3[i] != null) place(2, over3[i], m, rot()); });
-  if (G[4] && over3[3] != null) place(2, over3[3], G[4], rot());
+  if (gat[4] && over3[3] != null) place(2, over3[3], gat[4], rot());
   A.sel = null; renderBoard(); build();
 }
 function shuffleLayer(L) {
@@ -177,11 +184,15 @@ function stacks() {                                                             
   for (let k = 0; k < SITE.cols * SITE.rows; k++) { const ls = [0, 1, 2].filter(L => A.boards[L][k]); if (ls.length > 1 || (ls.length === 1 && ls[0] > 0)) out.push({ k, top: Math.max(...ls) }); }
   return out;
 }
-function connectedGroups() {                                                      // modules joined by bridges and by stacking (through a core)
+function pairsOf(L) {                                                             // neighbour pairs on a layer, with whether they are joined
+  if (A.pairs) return A.pairs.filter(p => p.L === L);
+  return connections(L).map(cn => ({ ...cn, joined: A.opts.bridges && cn.levels.length > 0, through: false }));
+}
+function connectedGroups() {                                                      // modules joined by seams, bridges and stacking (through a core)
   const nodes = [], id = new Map();
   for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (t) { id.set(`${L}:${k}`, nodes.length); nodes.push(`${L}:${k}`); } });
   const parent = nodes.map((_, i) => i), find = i => parent[i] === i ? i : (parent[i] = find(parent[i])), union = (a, b) => { parent[find(a)] = find(b); };
-  for (let L = 0; L < 3; L++) for (const cn of connections(L)) if (cn.levels.length) union(id.get(`${L}:${cn.a}`), id.get(`${L}:${cn.b}`));
+  for (let L = 0; L < 3; L++) for (const pr of pairsOf(L)) if (pr.joined) union(id.get(`${L}:${pr.a}`), id.get(`${L}:${pr.b}`));
   for (const s of stacks()) { const ls = [0, 1, 2].filter(L => A.boards[L][s.k]); for (let i = 1; i < ls.length; i++) union(id.get(`${ls[0]}:${s.k}`), id.get(`${ls[i]}:${s.k}`)); }
   const groups = new Set(nodes.map((_, i) => find(i))); return { modules: nodes.length, groups: groups.size };
 }
@@ -234,65 +245,165 @@ function latticeToLocal(m, x, y, z) {                                           
   if (m.fit) { const { min, scale, off } = m.fit; return [(x + 0.5 - off[0]) / scale + min[0], (y + 0.5 - off[1]) / scale + min[1], (N - z - 0.5 - off[2]) / scale + min[2]]; }
   return [(x + 0.5) * LAT + m.shift[0], (y + 0.5) * LAT + m.shift[1], -(z + 0.5) * LAT + m.shift[2]];
 }
-function build() {
-  if (!A.three) return;
+const FUSED = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
+function tintOf(use) { return '#' + new THREE.Color(0xece8e1).lerp(new THREE.Color(USE[use] ? USE[use].c : '#888'), 0.5).getHexString(); }
+function clearBuilding() {
   const { building, labels } = A.three;
   for (const g of [building, labels]) while (g.children.length) { const o = g.children.pop(); o.traverse?.(c => { if (c.geometry && !c.userData.shared) c.geometry.dispose(); }); }
+}
+/* Columns, deck and letter for a placed module — the parts both building modes share. */
+function furnish(t, k, L, tag, building, labels) {
+  const [c, r] = cellOf(k);
+  if (L === 0) {                                                                  // pilotis under the ground layer: columns on a 6 m grid, and a deck
+    const o = slotOrigin(c, r), cols = [];
+    for (let x = 3; x < SITE.slotX; x += 6.2) for (let z = 3; z < SITE.slotZ; z += 6) cols.push([o.x + x, o.z - z]);
+    const geo = new THREE.CylinderGeometry(0.35, 0.35, PODIUM + 0.6, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
+    cols.forEach(([x, z], i) => { tmp.position.set(x, (PODIUM + 0.6) / 2 - 0.3, z); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
+    inst.castShadow = true; building.add(inst);
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(SITE.slotX + SITE.gapX, 0.5, SITE.slotZ + SITE.gapZ), SLAB); deck.position.set(o.x + SITE.slotX / 2, PODIUM - 0.25, o.z - SITE.slotZ / 2); deck.receiveShadow = deck.castShadow = true; building.add(deck);
+  }
+  if (A.opts.labels) labels.add(label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'));
+}
+function cores(building) {                                                        // wherever modules stack, a stair-and-lift tower at the slot's north-west corner; the first is the red stair
+  if (!A.opts.cores) return;
+  stacks().forEach((s, i) => {
+    const [c, r] = cellOf(s.k), ctr = slotCentre(c, r), h = PODIUM + s.top * PITCH + MOD_H * 0.8;   // inside the body, at the centre of the stack
+    const core = new THREE.Mesh(new THREE.BoxGeometry(6, h, 5), i === 0 ? RED : CORE); core.position.set(ctr.x - 6, h / 2, ctr.z + 5); core.castShadow = core.receiveShadow = true; building.add(core);
+    if (i === 0) { const cap = new THREE.Mesh(new THREE.BoxGeometry(7, 0.4, 6), RED); cap.position.set(ctr.x - 6, h + 0.2, ctr.z + 5); building.add(cap); }
+  });
+}
+const WDIR = { S: [1, 0, 0, Math.PI / 2], N: [-1, 0, 0, -Math.PI / 2], E: [0, 0, -1, Math.PI], W: [0, 0, 1, 0] };   // world direction → offset and plane rotation
+function build() {
+  if (!A.three) return;
+  clearTimeout(A.buildTimer); if (R.stats) R.stats.classList.add('busy');
+  A.buildTimer = setTimeout(() => { const t0 = performance.now(); if (A.opts.fuse) buildFused(); else buildSeparate(); A.buildMs = Math.round(performance.now() - t0); renderCallouts(); renderBoard(); R.stats.classList.remove('busy'); }, 30);
+}
+/* One building: every module stamped into the grid, every seam morphed, one surface. */
+function buildFused() {
+  const { building, labels } = A.three; clearBuilding();
+  // the grid is cropped to the placed modules plus a margin (the whole board would be 1.6 M voxels; this is a fraction)
+  let minX = 1e9, maxX = -1, minY = 1e9, maxY = -1, minZ = 1e9, maxZ = -1;
+  for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => {
+    if (!t) return;
+    const [c, r] = cellOf(k), { gx0, gy0, gz0 } = gridBase(c, r, L), b = t.mod.an.bounds;
+    for (const [x, z] of [[b.xmin, b.zmin], [b.xmax, b.zmin], [b.xmin, b.zmax], [b.xmax, b.zmax]]) { const [u, v] = latToSlot(x, z, t.rot); minX = Math.min(minX, gx0 + u - 1); maxX = Math.max(maxX, gx0 + u - 1); minZ = Math.min(minZ, gz0 + v - 1); maxZ = Math.max(maxZ, gz0 + v - 1); }
+    minY = Math.min(minY, gy0 + b.ymin); maxY = Math.max(maxY, gy0 + b.ymax);
+  });
+  const OX = Math.max(0, minX - 2), OY = Math.max(0, minY - 2), OZ = Math.max(0, minZ - 2);
+  const DX = maxX < 0 ? 1 : Math.min(GX, maxX + 3) - OX, DY = maxX < 0 ? 1 : Math.min(GY, maxY + 3) - OY, DZ = maxX < 0 ? 1 : Math.min(GZ, maxZ + 3) - OZ;
+  const occ = new Uint8Array(DX * DY * DZ), lab = new Int16Array(DX * DY * DZ);
+  const gid = (x, y, z) => x + DX * (y + DY * z);
+  const placed = [], bySlot = {};                                                  // placements with their grid bounding boxes
+  const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; let letter = 0; const callouts = [];
+  for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => {
+    if (!t) return;
+    const [c, r] = cellOf(k), { gx0, gy0, gz0 } = gridBase(c, r, L), pid = placed.length + 1, m = t.mod, n = N;
+    const bb = { minX: 1e9, maxX: -1, minY: 1e9, maxY: -1, minZ: 1e9, maxZ: -1 };
+    for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      if (!m.occ[x + n * (y + n * z)]) continue;
+      const [u, v] = latToSlot(x, z, t.rot), gx = gx0 + u - 1 - OX, gy = gy0 + y - OY, gz = gz0 + v - 1 - OZ;
+      if (gx < 0 || gy < 0 || gz < 0 || gx >= DX || gy >= DY || gz >= DZ) continue;
+      const j = gid(gx, gy, gz); occ[j] = 1; lab[j] = pid;
+      if (gx < bb.minX) bb.minX = gx; if (gx > bb.maxX) bb.maxX = gx; if (gy < bb.minY) bb.minY = gy; if (gy > bb.maxY) bb.maxY = gy; if (gz < bb.minZ) bb.minZ = gz; if (gz > bb.maxZ) bb.maxZ = gz;
+    }
+    const tag = LETTERS[letter++ % LETTERS.length];
+    placed.push({ pid, t, k, L, c, r, bb, tag }); bySlot[`${L}:${k}`] = placed[placed.length - 1];
+    callouts.push({ tag, L, c, r, t });
+  });
+  // the seams: along the lot, across it, and between stacked layers — each one a morph between the two sections
+  const pairs = [], BIAS = 0.15;
+  const seam = (P, Q, axis) => {
+    const a = P.bb, b = Q.bb;
+    const lo = k1 => Math.max(0, Math.min(a[k1], b[k1]) - 2), hi = (k2, lim) => Math.min(lim, Math.max(a[k2], b[k2]) + 3);
+    if (axis === 0) return morphSeam(occ, lab, DX, DY, DZ, 0, a.maxX, b.minX, P.pid, Q.pid, lo('minY'), hi('maxY', DY), lo('minZ'), hi('maxZ', DZ), 3, BIAS);
+    if (axis === 2) return morphSeam(occ, lab, DX, DY, DZ, 2, a.maxZ, b.minZ, P.pid, Q.pid, lo('minX'), hi('maxX', DX), lo('minY'), hi('maxY', DY), 3, BIAS);
+    return morphSeam(occ, lab, DX, DY, DZ, 1, a.maxY, b.minY, P.pid, Q.pid, lo('minX'), hi('maxX', DX), lo('minZ'), hi('maxZ', DZ), 3, BIAS);
+  };
+  const cns = [0, 1, 2].map(L => connections(L));
+  for (const P of placed) {
+    if (P.bb.maxX < 0) continue;
+    const east = bySlot[`${P.L}:${P.k + SITE.cols}`], south = P.c + 1 < SITE.cols ? bySlot[`${P.L}:${P.k + 1}`] : null, up = bySlot[`${P.L + 1}:${P.k}`];
+    if (south && south.bb.maxX >= 0) { const cn = cns[P.L].find(x => x.a === P.k && x.b === P.k + 1); const through = seam(P, south, 0); pairs.push({ L: P.L, a: P.k, b: P.k + 1, axis: 'x', levels: cn ? cn.levels : [], through, joined: through }); }
+    if (east && east.bb.maxX >= 0) { const cn = cns[P.L].find(x => x.a === P.k && x.b === P.k + SITE.cols); const through = seam(P, east, 2); pairs.push({ L: P.L, a: P.k, b: P.k + SITE.cols, axis: 'z', levels: cn ? cn.levels : [], through, joined: through }); }
+    if (up && up.bb.maxX >= 0) seam(P, up, 1);
+  }
+  // bridges only where a seam did not join two neighbours but they share a floor height
+  const links = [];
+  for (const pr of pairs) {
+    if (!pr.through && A.opts.bridges && pr.levels.length) {
+      const [ca, ra] = cellOf(pr.a), [cb, rb] = cellOf(pr.b), A0 = slotOrigin(ca, ra), B0 = slotOrigin(cb, rb), y0 = PODIUM + pr.L * PITCH;
+      if (pr.axis === 'x') pr.levels.forEach((lv, i) => bridge(building, A0.x + SITE.slotX - 1.5, B0.x + 1.5, y0 + lv.y * LAT, A0.z - SITE.slotZ / 2 + (i ? 6 : -4), 'x'));
+      else pr.levels.forEach((lv, i) => bridge(building, A0.z - SITE.slotZ + 1.5, B0.z - 1.5, y0 + lv.y * LAT, A0.x + SITE.slotX / 2 + (i ? 6 : -4), 'z'));
+      pr.joined = true;
+    }
+    links.push({ L: pr.L, through: pr.through, bridged: pr.joined && !pr.through });
+  }
+  A.pairs = pairs;
+  // the surface
+  if (placed.length) {
+    const colorOf = pid => { const P = placed[pid - 1]; return P ? tintOf(P.t.mod.use) : '#e9e5de'; };
+    const g = fusedGeometry(occ, lab, DX, DY, DZ, colorOf, 10);
+    const P = g.getAttribute('position'), arr = P.array;
+    for (let i = 0; i < P.count; i++) { arr[i * 3] = gridX(arr[i * 3] + OX); arr[i * 3 + 1] = gridY(arr[i * 3 + 1] + OY); arr[i * 3 + 2] = gridZ(arr[i * 3 + 2] + OZ); }
+    P.needsUpdate = true; g.computeVertexNormals(); g.computeBoundingSphere();
+    const mesh = new THREE.Mesh(g, FUSED); mesh.castShadow = mesh.receiveShadow = true; mesh.name = 'Valve HQ · fused'; building.add(mesh);
+  }
+  // windows, columns, decks, letters, cores
+  for (const P of placed) {
+    const { t, k, L, c, r } = P;
+    if (A.opts.windows && t.mod.an.panels.length) {
+      const { gx0, gy0, gz0 } = gridBase(c, r, L), inv = Object.fromEntries(Object.entries(FACE[t.rot]).map(([d, side]) => [side, d]));
+      const geo = new THREE.PlaneGeometry(1.0 * LAT, 0.62 * LAT), inst = new THREE.InstancedMesh(geo, WINDOW, t.mod.an.panels.length), tmp = new THREE.Object3D();
+      t.mod.an.panels.forEach(([x, y, z, side], i) => {
+        const [u, v] = latToSlot(x, z, t.rot), d = WDIR[inv[side]];
+        tmp.position.set(gridX(gx0 + u - 1) + d[0] * 0.66 * LAT, gridY(gy0 + y), gridZ(gz0 + v - 1) + d[2] * 0.66 * LAT); tmp.rotation.set(0, d[3], 0); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix);
+      });
+      inst.instanceMatrix.needsUpdate = true; building.add(inst);
+    }
+    furnish(t, k, L, P.tag, building, labels);
+  }
+  cores(building);
+  A.three.callouts = callouts; A.three.links = links;
+}
+/* The older building: every module its own mesh in its bay, bridges and garden walls between. */
+function buildSeparate() {
+  const { building, labels } = A.three; clearBuilding(); A.pairs = null;
   const callouts = [];
   let letter = 0; const LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  // modules
   for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => {
     if (!t) return;
     const M = placement(k, L, t.rot, t.mod.geo);
     const mesh = new THREE.Mesh(t.mod.geo, matFor(t.mod.use)); mesh.applyMatrix4(M); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.shared = true; mesh.name = `${t.mod.id} ${t.mod.name}`; building.add(mesh);
     const [c, r] = cellOf(k), tag = LETTERS[letter++ % LETTERS.length];
     callouts.push({ tag, L, c, r, t });
-    // windows: a dark pane on every thin exterior wall face of the module's lattice
     if (A.opts.windows && t.mod.an.panels.length) {
       const geo = new THREE.PlaneGeometry(1.0 * LAT, 0.62 * LAT), inst = new THREE.InstancedMesh(geo, WINDOW, t.mod.an.panels.length), tmp = new THREE.Object3D();
       const rotFor = { px: [0, Math.PI / 2, 0], nx: [0, -Math.PI / 2, 0], pz: [0, Math.PI, 0], nz: [0, 0, 0] };
       t.mod.an.panels.forEach(([x, y, z, side], i) => {
         const [lx, ly, lz] = latticeToLocal(t.mod, x, y, z);
-        const off = { px: [LAT * 0.52, 0, 0], nx: [-LAT * 0.52, 0, 0], pz: [0, 0, -LAT * 0.52], nz: [0, 0, LAT * 0.52] }[side];   // lattice +z is the back: local −z
+        const off = { px: [LAT * 0.52, 0, 0], nx: [-LAT * 0.52, 0, 0], pz: [0, 0, -LAT * 0.52], nz: [0, 0, LAT * 0.52] }[side];
         tmp.position.set(lx + off[0], ly, lz + off[2]); tmp.rotation.set(...rotFor[side]); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix);
       });
       inst.applyMatrix4(M); inst.instanceMatrix.needsUpdate = true; building.add(inst);
     }
-    // pilotis under the ground layer: columns on a 6 m grid inside the footprint
-    if (L === 0) {
-      const o = slotOrigin(c, r), cols = [];
-      for (let x = 3; x < SITE.slotX; x += 6.2) for (let z = 3; z < SITE.slotZ; z += 6) cols.push([o.x + x, o.z - z]);
-      const geo = new THREE.CylinderGeometry(0.35, 0.35, PODIUM + 0.6, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
-      cols.forEach(([x, z], i) => { tmp.position.set(x, (PODIUM + 0.6) / 2 - 0.3, z); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
-      inst.castShadow = true; building.add(inst);
-      const deck = new THREE.Mesh(new THREE.BoxGeometry(SITE.slotX + 1, 0.5, SITE.slotZ + 1), SLAB); deck.position.set(o.x + SITE.slotX / 2, PODIUM - 0.25, o.z - SITE.slotZ / 2); deck.receiveShadow = deck.castShadow = true; building.add(deck);
-    }
-    if (A.opts.labels) labels.add(label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'));
+    furnish(t, k, L, tag, building, labels);
   });
-  // bridges and garden walls
   const links = [];
   for (let L = 0; L < 3; L++) for (const cn of connections(L)) {
     const [ca, ra] = cellOf(cn.a), [cb, rb] = cellOf(cn.b), A0 = slotOrigin(ca, ra), B0 = slotOrigin(cb, rb), y0 = PODIUM + L * PITCH;
-    const ta = A.boards[L][cn.a], tb = A.boards[L][cn.b];
-    if (cn.axis === 'x') {                                                       // neighbours along the lot: the gap between A's south face and B's north face
+    if (cn.axis === 'x') {
       const x0 = A0.x + SITE.slotX, x1 = B0.x, zc = A0.z - SITE.slotZ / 2;
       if (A.opts.bridges && cn.levels.length) cn.levels.forEach((lv, i) => bridge(building, x0 - 1.5, x1 + 1.5, y0 + lv.y * LAT, zc + (i ? 6 : -4), 'x'));
       else if (A.opts.walls && L === 0) wall(building, x0, x1, y0, zc, 'x');
-    } else {                                                                      // neighbours across the lot: the gap between A's east face and B's west face
+    } else {
       const z0 = A0.z - SITE.slotZ, z1 = B0.z, xc = A0.x + SITE.slotX / 2;
       if (A.opts.bridges && cn.levels.length) cn.levels.forEach((lv, i) => bridge(building, z0 + 1.5, z1 - 1.5, y0 + lv.y * LAT, xc + (i ? 6 : -4), 'z'));
       else if (A.opts.walls && L === 0) wall(building, z1, z0, y0, xc, 'z');
     }
-    links.push({ L, a: `${ta.mod.id}`, b: `${tb.mod.id}`, levels: cn.levels.map(l => Math.round(l.y * LAT)) });
+    links.push({ L, through: false, bridged: A.opts.bridges && cn.levels.length > 0 });
   }
-  // cores: wherever modules stack, a stair-and-lift tower in the gap at the slot's north-west corner; the first one is the red stair
-  if (A.opts.cores) stacks().forEach((s, i) => {
-    const [c, r] = cellOf(s.k), o = slotOrigin(c, r), h = PODIUM + s.top * PITCH + MOD_H * 0.75;
-    const core = new THREE.Mesh(new THREE.BoxGeometry(6, h, 5), i === 0 ? RED : CORE); core.position.set(o.x + 3.5, h / 2, o.z - 3); core.castShadow = core.receiveShadow = true; building.add(core);
-    if (i === 0) { const cap = new THREE.Mesh(new THREE.BoxGeometry(7, 0.4, 6), RED); cap.position.set(o.x + 3.5, h + 0.2, o.z - 3); building.add(cap); }
-  });
+  cores(building);
   A.three.callouts = callouts; A.three.links = links;
-  renderCallouts();
 }
 function bridge(group, a0, a1, y, across, axis) {                                 // a glazed link, 4 m wide, 3.3 m tall, from a0 to a1 along the axis
   const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2, W = 4, H = 3.3;
@@ -312,6 +423,21 @@ function label(text, x, y, z, color) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false })); s.position.set(x, y, z); s.scale.set(6, 6, 1); return s;
 }
 
+/* Camera presets framed on the building: its bounding box (or the lot's middle when the board is empty). */
+function setView(name) {
+  const { camera, controls, building } = A.three, bb = new THREE.Box3();
+  building.children.forEach(o => { if (o.isMesh || o.isInstancedMesh) bb.expandByObject(o); });
+  if (bb.isEmpty()) bb.set(new THREE.Vector3(SITE.length / 2 - 60, 0, -SITE.width / 2 - 30), new THREE.Vector3(SITE.length / 2 + 60, 40, -SITE.width / 2 + 30));
+  const c = bb.getCenter(new THREE.Vector3()), size = bb.getSize(new THREE.Vector3()), span = Math.max(size.x, size.z, size.y * 1.5), d = span * 1.3 + 50;
+  const v = {
+    street: [[c.x + d * 0.55, size.y * 0.9 + 22, c.z + d * 0.8], [c.x, size.y * 0.35, c.z]],            // from the street, south-west, looking at the bay
+    bay: [[c.x - d * 0.55, size.y * 0.9 + 22, c.z - d * 0.8], [c.x, size.y * 0.35, c.z]],               // from the water, north-east
+    aerial: [[c.x + d * 0.45, d * 0.95, c.z + d * 0.7], [c.x, 0, c.z]],
+    plan: [[c.x, d * 1.4, c.z + 0.01], [c.x, 0, c.z]],
+  }[name];
+  camera.position.set(...v[0]); controls.target.set(...v[1]); controls.update();
+}
+
 // ------------------------------------------------------------------ the page
 function renderPalette() {
   R.palette.innerHTML = A.modules.map(m => `<button type="button" class="as-pal${A.pick === m.id ? ' on' : ''}" data-pick="${m.id}" title="${esc(m.name)} · ${esc(m.note)}"><canvas width="120" height="120"></canvas><span><b style="color:${USE[m.use] ? USE[m.use].c : '#888'}">${esc(m.id)}</b>${esc(m.name)}</span></button>`).join('');
@@ -320,24 +446,26 @@ function renderPalette() {
 function renderBoard() {
   const L = A.layer, b = A.boards[L];
   $$('[data-layer]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.layer === L));
-  const cn = connections(L);
+  const prs = pairsOf(L);
   R.board.innerHTML = b.map((t, k) => { const [c, r] = cellOf(k); return `<div class="as-slot${t ? '' : ' empty'}${A.sel === k ? ' sel' : ''}" data-k="${k}" style="grid-column:${c + 1};grid-row:${r + 1}" title="${t ? esc(t.mod.name) : 'empty bay'}">${t ? `<canvas width="120" height="120"></canvas><em>${esc(t.mod.id)}</em>` : ''}</div>`; }).join('')
-    + cn.map(x => { const [c, r] = cellOf(x.a); const has = x.levels.length; return `<i class="as-link ${x.axis}${has ? '' : ' wall'}" style="--c:${c};--r:${r}" title="${has ? `bridge at ${x.levels.map(l => Math.round(l.y * LAT) + ' m').join(', ')}` : 'no shared floor: garden wall'}"></i>`; }).join('');
-  $$('.as-slot canvas', R.board).forEach(c => { const k = +c.parentElement.dataset.k, t = b[k]; c.getContext('2d').drawImage(planOf(t.mod, t.rot), 0, 0); });
+    + prs.map(x => { const [c, r] = cellOf(x.a); const cls = x.through ? ' fused' : x.joined ? '' : ' wall'; const title = x.through ? 'the two modules morph into each other across the seam' : x.joined ? `bridge at ${x.levels.map(l => Math.round(l.y * LAT) + ' m').join(', ')}` : 'no shared floor: the seam stays open'; return `<i class="as-link ${x.axis}${cls}" style="--c:${c};--r:${r}" title="${title}"></i>`; }).join('');
+  $$('.as-slot canvas', R.board).forEach(cv => { const k = +cv.parentElement.dataset.k, t = b[k]; cv.getContext('2d').drawImage(planOf(t.mod, t.rot), 0, 0); });
+  renderStats(); save();
+}
+function renderStats() {
   const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, som: 0 }; let area = 0, groundOffice = 0, westLobby = 0;
   for (let l = 0; l < 3; l++) A.boards[l].forEach((t, k) => { if (!t) return; uses[t.mod.use]++; area += t.mod.an.floors.length * LAT * LAT; if (l === 0 && t.mod.use === 'office') groundOffice++; if (l === 0 && cellOf(k)[1] === 0 && t.mod.use === 'lobby') westLobby++; });
   const notes = [];
-  notes.push(g.modules ? (g.groups === 1 ? 'Every module is reachable — bridges and cores join them all.' : `${g.groups} separate groups: add a bridge-able neighbour or stack a module to join them.`) : 'Place modules: pick one in the palette, click an empty bay.');
+  notes.push(g.modules ? (g.groups === 1 ? 'Every module is reachable — the seams, bridges and cores join them all.' : `${g.groups} separate groups: put a neighbour beside one of them, or stack a module, to join them.`) : 'Place modules: pick one in the palette, click an empty bay.');
   if (groundOffice) notes.push(`${groundOffice} office module${groundOffice > 1 ? 's' : ''} on the ground layer: the ground floods — cabals belong a level up.`);
   if (uses.lobby && westLobby < Math.min(uses.lobby, 3)) notes.push('Lobbies make the public edge: put them in the west row, along the street.');
   R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of floor · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.som ? ` · ${uses.som} from the map` : ''}<br><span class="hint">${notes.join(' ')}</span>`;
-  save();
 }
 function renderCallouts() {
   const cs = A.three && A.three.callouts || [];
   R.callouts.innerHTML = cs.length ? cs.map(({ tag, L, c, r, t }) => `<div class="as-call"><b style="background:${USE[t.mod.use] ? USE[t.mod.use].c : '#888'}">${tag}</b><div><div class="n">${esc(t.mod.id)} ${esc(t.mod.name)} <small>· ${esc(t.mod.typology)}</small></div><div class="hint">Bay ${'ABCDEFG'[c]}${r + 1} · ${LAYERS[L].split(' ·')[0]} · turned ${t.rot * 90}° · ${esc(t.mod.note)}</div></div></div>`).join('') : '<p class="hint">The building follows the board: place modules to see them here, each with where it came from.</p>';
-  const links = A.three && A.three.links || [];
-  R.linkNote.textContent = links.length ? `${links.filter(l => l.levels.length).length} bridges at shared floor heights, ${links.filter(l => !l.levels.length).length} garden walls where neighbours share no floor, ${stacks().length} cores where modules stack (the first is the red stair).` : '';
+  const links = A.three && A.three.links || [], nf = links.filter(l => l.through).length, nb = links.filter(l => l.bridged).length, no = links.length - nf - nb;
+  R.linkNote.textContent = links.length ? `${nf} seams where neighbours morph into each other, ${nb} bridges where they share a floor height but no mass meets, ${no} open seams, ${stacks().length} cores where modules stack (the first is the red stair).` : '';
 }
 function download(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
 function planPicture() {                                                          // the board as a site plan, for the deck
@@ -366,10 +494,11 @@ const HTML = `
     <h2 class="eyebrow" style="margin-top:16px">The board</h2>
     <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn quiet" data-v="shuffle">Shuffle layer</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="rotate">Turn selected 90°</button><button type="button" class="btn quiet" data-v="remove">Remove selected</button></div>
-    <p class="hint">Slide: select a tile, then click an empty bay (the arrow keys slide it into a neighbouring empty bay). Three layers: ground on pilotis, two above.</p>
+    <p class="hint">Slide: select a tile, then click an empty bay (the arrow keys slide it into a neighbouring empty bay). Bays are 31 m with a 3 m seam between; three layers: ground on pilotis, two above.</p>
     <h2 class="eyebrow" style="margin-top:16px">The building</h2>
-    <label class="chk"><input type="checkbox" data-opt="bridges" checked> Bridges at shared floors</label>
-    <label class="chk"><input type="checkbox" data-opt="walls" checked> Garden walls where no floor meets</label>
+    <label class="chk"><input type="checkbox" data-opt="fuse" checked> Fuse the modules — they morph into each other across the seams</label>
+    <label class="chk"><input type="checkbox" data-opt="bridges" checked> Bridges where floors meet but no mass does</label>
+    <label class="chk"><input type="checkbox" data-opt="walls"> Garden walls (separate modules only)</label>
     <label class="chk"><input type="checkbox" data-opt="windows" checked> Windows in the thin walls</label>
     <label class="chk"><input type="checkbox" data-opt="cores" checked> Cores where modules stack</label>
     <label class="chk"><input type="checkbox" data-opt="labels" checked> Letters over the modules</label>
@@ -408,11 +537,7 @@ export function mount(root) {
     if (!A.boards[A.layer][k2]) { moveTile(A.layer, A.sel, k2); A.sel = k2; renderBoard(); build(); } e.preventDefault();
   });
   $$('[data-layer]', root).forEach(b => b.addEventListener('click', () => { A.layer = +b.dataset.layer; A.sel = null; renderBoard(); }));
-  $$('[data-view]', root).forEach(b => b.addEventListener('click', () => {
-    const { camera, controls } = A.three, cx = SITE.length / 2, cz = -SITE.width / 2;
-    const v = { street: [[SITE.length + 110, 70, 140], [cx, 20, cz + 10]], bay: [[-90, 70, -SITE.width - 150], [cx, 20, cz]], aerial: [[cx + 120, 230, 190], [cx, 0, cz]], plan: [[cx, 400, cz + 0.01], [cx, 0, cz]] }[b.dataset.view];
-    camera.position.set(...v[0]); controls.target.set(...v[1]); controls.update();
-  }));
+  $$('[data-view]', root).forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
   R.auto.addEventListener('click', () => autoArrange());
   R.shuffle.addEventListener('click', () => shuffleLayer(A.layer));
   R.clear.addEventListener('click', () => { clearLayer(A.layer); A.sel = null; renderBoard(); build(); });
@@ -424,6 +549,6 @@ export function mount(root) {
   R.glb.addEventListener('click', () => new GLTFExporter().parse(A.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ.glb'), err => console.error(err), { binary: true }));
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(A.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ.obj'));
   R.stats.textContent = 'Loading the fifteen modules…';
-  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) autoArrange(7); else { renderBoard(); build(); } }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
+  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) autoArrange(7); else { renderBoard(); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
   return { show() { window.dispatchEvent(new Event('resize')); }, addModule };
 }
