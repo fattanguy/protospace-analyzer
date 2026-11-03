@@ -47,7 +47,7 @@ const gridBase = (c, r, L) => ({ gx0: MARGIN_V + c * (SLOT_V + GAP_V), gz0: MARG
 
 const A = {
   modules: [], boards: [[], [], []], layer: 0, sel: null, pick: null, custom: 0, cat: 'lobby',
-  three: null, ready: false, pairs: null, uid: 0, history: [], future: [], hover: null, opts: { fuse: true, walls: false, cores: true, labels: true },
+  three: null, ready: false, pairs: null, uid: 0, history: [], future: [], hover: null, opts: { fuse: true, cores: true, labels: true },
 };
 for (let L = 0; L < 3; L++) A.boards[L] = Array.from({ length: SITE.cols * SITE.rows }, () => null);   // { mod, rot }
 let R = {};
@@ -167,17 +167,7 @@ function autoArrange(seed = Date.now() % 1000) {
   }
   A.sel = null; renderBoard(); build();
 }
-/* All fifteen catalogue modules on one floor: the other layers are emptied and the ground floor gets a 5 × 3 block centred on
-   the lot — the lobbies along the street row, the gathering rooms in the middle, the offices on the bay side — with the
-   end bays empty, so there is room to slide. */
-function fillFloor(L = 0) {
-  const by = u => A.modules.filter(m => m.use === u && m.source === 'catalogue'), rows = [by('lobby'), by('social'), by('office')];
-  for (let i = 0; i < 3; i++) clearLayer(i); A.layer = L;
-  rows.forEach((ms, r) => { const c0 = Math.max(0, Math.floor((SITE.cols - ms.length) / 2)); ms.forEach((m, i) => { if (c0 + i < SITE.cols) place(L, idx(c0 + i, r), m, 1); }); });
-  A.sel = null; renderBoard(); build();
-}
-
-// ------------------------------------------------------------------ connections: seams, walls, cores
+// ------------------------------------------------------------------ connections: seams, cores
 /* The module's lattice side facing a world direction, given its quarter turns. Lattice: +x, −x across; z = 0 front,
    z = n back. The mesh's local z is −lattice z. At rot 0 local +x → world +x (south), local −z (front) → world −z (east). */
 const FACE = { 0: { S: 'px', N: 'nx', E: 'pz', W: 'nz' }, 1: { E: 'px', W: 'nx', S: 'nz', N: 'pz' }, 2: { N: 'px', S: 'nx', W: 'pz', E: 'nz' }, 3: { W: 'px', E: 'nx', N: 'nz', S: 'pz' } };
@@ -245,7 +235,7 @@ function initThree(canvas) {
 }
 const MATS = {};
 function matFor(use) { if (!MATS[use]) { const c = new THREE.Color(0xe9e5de).lerp(new THREE.Color(USE[use] ? USE[use].c : '#888'), 0.22); MATS[use] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }); } return MATS[use]; }
-const SLAB = new THREE.MeshStandardMaterial({ color: 0xbdb7ae, roughness: 0.95 });
+const SLAB = new THREE.MeshStandardMaterial({ color: 0xbdb7ae, roughness: 0.95, side: THREE.DoubleSide });
 const RED = new THREE.MeshStandardMaterial({ color: 0xc62828, roughness: 0.7 });
 const CORE = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.85 });
 const COLUMN = new THREE.MeshStandardMaterial({ color: 0xcfcac2, roughness: 0.9 });
@@ -264,37 +254,53 @@ function clearBuilding() {
   const { building, labels } = A.three;
   for (const g of [building, labels]) while (g.children.length) { const o = g.children.pop(); o.traverse?.(c => { if (c.geometry && !c.userData.shared) c.geometry.dispose(); }); }
 }
-/* The deck and the pilotis under a ground module, only where it stands: the footprint of its lowest two voxel
-   layers, closed and grown by two voxels so nearby feet share one pad, as a thin slab contoured at half-voxel
-   resolution (so its edge is smooth, not stepped), with a column on a 6 m grid wherever the slab is. */
-function deckFor(t, k, building) {
+/* Continuous lattice coordinates (voxel x spans [x, x + 1)) → the module's local metres, its mesh frame. */
+function latticeToLocal(m, X, Y, Z) {
+  if (m.fit) { const { min, scale, off } = m.fit; return [(X - off[0]) / scale + min[0], (Y - off[1]) / scale + min[1], (N - Z - off[2]) / scale + min[2]]; }
+  return [X * LAT + m.shift[0], Y * LAT + m.shift[1], -Z * LAT + m.shift[2]];
+}
+const DECK_T = 0.7;                                                                 // the pad's thickness (m)
+/* The deck and the pilotis under a ground module, only where it stands: the footprint of its lowest two voxel layers,
+   closed and grown by two voxels so nearby feet share one pad, as a slab contoured at half-voxel resolution (so its
+   edge is smooth, not stepped), with a column on a 6 m grid wherever the pad is. The pad is drawn in the module's own
+   lattice and put where the module is: through the lattice frame when the building is fused, through the mesh's
+   placement matrix when the modules are separate. */
+function deckFor(t, k, building, M = null) {
   const m = t.mod, n = N, y0 = m.an.bounds.ymin, [c, r] = cellOf(k), o = slotOrigin(c, r);
-  const M0 = -4, W = SLOT_V + 8, idx2 = (s, w) => (s - M0) + W * (w - M0), inside = (s, w) => s >= M0 && w >= M0 && s < M0 + W && w < M0 + W;
+  const M0 = -4, W = n + 8, at = (x, z) => (x - M0) + W * (z - M0);
   let mask = new Uint8Array(W * W);
-  for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) if (m.occ[x + n * (y0 + n * z)] || m.occ[x + n * (y0 + 1 + n * z)]) { const [u, v] = latToSlot(x, z, t.rot); if (inside(u - 1, v - 1)) mask[idx2(u - 1, v - 1)] = 1; }
+  for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) if (m.occ[x + n * (y0 + n * z)] || m.occ[x + n * (y0 + 1 + n * z)]) mask[at(x, z)] = 1;
   const grow = (src, rad, all) => { const out = new Uint8Array(src.length); for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { let n1 = 0, tot = 0; for (let dj = -rad; dj <= rad; dj++) for (let di = -rad; di <= rad; di++) { const I = i + di, J = j + dj; tot++; if (I >= 0 && J >= 0 && I < W && J < W && src[I + W * J]) n1++; } out[i + W * j] = all ? (n1 === tot ? 1 : 0) : (n1 ? 1 : 0); } return out; };
   mask = grow(grow(mask, 3, false), 1, true);                                     // dilate 3, erode 1: +2 all round, gaps up to 6 voxels bridged
   if (!mask.some(Boolean)) return;
+  // continuous lattice (X, Z) → world (x, z)
+  const toWorld = (X, Z) => {
+    if (M) { const [lx, , lz] = latticeToLocal(m, X, 0, Z); const v = new THREE.Vector3(lx, 0, lz).applyMatrix4(M); return [v.x, v.z]; }
+    const [U, V] = [[X, Z], [n - Z, X], [n - X, n - Z], [Z, n - X]][t.rot & 3];   // the lattice turned on the board (latToSlot for a continuous coordinate)
+    return [o.x + (U - 1) * LAT, o.z - (V - 1) * LAT];
+  };
   // the slab: the mask at twice the resolution, one cell thick, contoured and smoothed
   const S = 2 * W + 2, H = 4, occ = new Uint8Array(S * H * S);
   for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) if (mask[i + W * j]) for (let dj = 0; dj < 2; dj++) for (let di = 0; di < 2; di++) occ[(2 * i + 1 + di) + S * (1 + H * (2 * j + 1 + dj))] = 1;
   const { pos, index } = surfaceNets(occ, new Int16Array(occ.length), S, H, S); taubin(pos, index, 6);
-  const half = LAT / 2;
-  for (let i = 0; i < pos.length; i += 3) { pos[i] = o.x + ((pos[i] - 0.5) / 2 + M0) * LAT; pos[i + 1] = PODIUM - half / 2 + (pos[i + 1] - 1) * half; pos[i + 2] = o.z - ((pos[i + 2] - 0.5) / 2 + M0) * LAT; }
+  for (let i = 0; i < pos.length; i += 3) { const [wx, wz] = toWorld((pos[i] - 0.5) / 2 + M0, (pos[i + 2] - 0.5) / 2 + M0); pos[i] = wx; pos[i + 1] = PODIUM - DECK_T / 2 + (pos[i + 1] - 1) * DECK_T; pos[i + 2] = wz; }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(index, 1)); g.computeVertexNormals();
   const deck = new THREE.Mesh(g, SLAB); deck.receiveShadow = deck.castShadow = true; building.add(deck);
-  // the pilotis: a column at every 6 m grid point the slab covers
+  // the pilotis: a column under every 6 m grid point of the bay the pad covers
   const cols = [];
-  for (let w = M0; w < M0 + W; w++) for (let s2 = M0; s2 < M0 + W; s2++) if (((s2 - 3) % 6 + 6) % 6 === 0 && ((w - 3) % 6 + 6) % 6 === 0 && mask[idx2(s2, w)]) cols.push([o.x + (s2 + 0.5) * LAT, o.z - (w + 0.5) * LAT]);
+  for (let z = M0; z < M0 + W; z++) for (let x = M0; x < M0 + W; x++) {
+    if (!mask[at(x, z)]) continue; const [wx, wz] = toWorld(x + 0.5, z + 0.5), sx = Math.round((wx - o.x) / LAT - 0.5), sz = Math.round((o.z - wz) / LAT - 0.5);
+    if (((sx - 3) % 6 + 6) % 6 === 0 && ((sz - 3) % 6 + 6) % 6 === 0) cols.push([wx, wz]);
+  }
   if (!cols.length) return;
-  const geo = new THREE.CylinderGeometry(0.35, 0.35, PODIUM + 0.3, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
-  cols.forEach(([x, z], i) => { tmp.position.set(x, (PODIUM + 0.3) / 2 - 0.3, z); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
+  const geo = new THREE.CylinderGeometry(0.35, 0.35, PODIUM - DECK_T + 0.3, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
+  cols.forEach(([x, z], i) => { tmp.position.set(x, (PODIUM - DECK_T + 0.3) / 2 - 0.3, z); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
   inst.castShadow = true; building.add(inst);
 }
 /* Deck, pilotis and letter for a placed module — the parts both building modes share. */
-function furnish(t, k, L, tag, building, labels) {
+function furnish(t, k, L, tag, building, labels, M = null) {
   const [c, r] = cellOf(k);
-  if (L === 0) deckFor(t, k, building);
+  if (L === 0) deckFor(t, k, building, M);
   if (A.opts.labels) { const sp = label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'); sp.userData.slot = `${L}:${k}`; labels.add(sp); }
 }
 function cores(building) {                                                        // separate modules only: a stair-and-lift tower beside each stack; the first is the red stair (the fused body grows its own)
@@ -403,7 +409,7 @@ function buildFused() {
   A.three.callouts = callouts; A.three.links = links; A.three.placed = placed;
   applyHighlight();
 }
-/* The older building: every module its own mesh in its bay, garden walls between at ground. */
+/* The older building: every module its own mesh in its bay. */
 function buildSeparate() {
   const { building, labels } = A.three; clearBuilding(); A.pairs = null;
   const callouts = [];
@@ -414,27 +420,12 @@ function buildSeparate() {
     const mesh = new THREE.Mesh(t.mod.geo, matFor(t.mod.use)); mesh.applyMatrix4(M); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.shared = true; mesh.userData.slot = { L, k }; mesh.name = `${t.mod.id} ${t.mod.name}`; building.add(mesh);
     const [c, r] = cellOf(k), tag = LETTERS[letter++ % LETTERS.length];
     callouts.push({ tag, L, c, r, t });
-    furnish(t, k, L, tag, building, labels);
+    furnish(t, k, L, tag, building, labels, M);
   });
-  const links = [];
-  for (let L = 0; L < 3; L++) for (const cn of connections(L)) {
-    const [ca, ra] = cellOf(cn.a), [cb, rb] = cellOf(cn.b), A0 = slotOrigin(ca, ra), B0 = slotOrigin(cb, rb), y0 = PODIUM + L * PITCH;
-    if (cn.axis === 'x') {
-      const x0 = A0.x + SITE.slotX, x1 = B0.x, zc = A0.z - SITE.slotZ / 2;
-      if (A.opts.walls && L === 0) wall(building, x0, x1, y0, zc, 'x');
-    } else {
-      const z0 = A0.z - SITE.slotZ, z1 = B0.z, xc = A0.x + SITE.slotX / 2;
-      if (A.opts.walls && L === 0) wall(building, z1, z0, y0, xc, 'z');
-    }
-    links.push({ L, through: false });
-  }
+  const links = []; for (let L = 0; L < 3; L++) for (const cn of connections(L)) links.push({ L, through: false });
   cores(building);
   A.three.callouts = callouts; A.three.links = links; A.three.placed = null;
   applyHighlight();
-}
-function wall(group, a0, a1, y, across, axis) {                                   // a garden wall closing the gap at ground, with a door-sized gap left in it
-  const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2, h = 3.2;
-  for (const dz of [-6, 6]) { const m = new THREE.Mesh(new THREE.BoxGeometry(len, h, 0.4), SLAB); if (axis === 'x') m.position.set(mid, y + h / 2, across + dz); else { m.rotation.y = Math.PI / 2; m.position.set(across + dz, y + h / 2, mid); } m.castShadow = m.receiveShadow = true; group.add(m); }
 }
 function label(text, x, y, z, color) {
   const c = document.createElement('canvas'); c.width = 128; c.height = 128; const g = c.getContext('2d');
@@ -647,12 +638,11 @@ const HTML = `
     <div class="as-palhead"><select data-v="cat" class="as-cat" aria-label="Kind of space"></select><span class="hint" data-v="catNote"></span></div>
     <div class="as-palette" data-v="palette"></div>
     <h2 class="eyebrow" style="margin-top:16px">The board</h2>
-    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn" data-v="fill" title="One floor with all fifteen modules: lobbies on the street row, gathering rooms in the middle, offices on the bay side, six empty bays to slide into">All 15 on one floor</button><button type="button" class="btn quiet" data-v="shuffle">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
-    <div class="xp-row"><button type="button" class="btn quiet" data-v="undo" title="Ctrl/⌘ Z">Undo</button><button type="button" class="btn quiet" data-v="redo" title="Ctrl/⌘ Shift Z">Redo</button><button type="button" class="btn quiet" data-v="rotate" title="R, or double-click a tile">Turn 90°</button><button type="button" class="btn quiet" data-v="remove" title="Delete, or drag a tile off the board">Remove</button></div>
-    <p class="hint">It is a sliding puzzle: click a tile with one empty bay beside it and it slides there; drag any tile to any bay (onto another tile to swap); drag it off the board to take it out; arrow keys slide the selected tile, R turns it, 1 2 3 change layer. Three layers: ground on pilotis, two above — a tile on an upper layer needs a module below it.</p>
+    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn quiet" data-v="shuffle">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
+    <div class="xp-row"><button type="button" class="btn quiet" data-v="undo" title="Ctrl/⌘ Z">Undo</button><button type="button" class="btn quiet" data-v="redo" title="Ctrl/⌘ Shift Z">Redo</button><button type="button" class="btn quiet" data-v="remove" title="Delete, or drag a tile off the board">Remove</button></div>
+    <p class="hint">It is a sliding puzzle: click a tile with one empty bay beside it and it slides there; drag any tile to any bay (onto another tile to swap); drag it off the board to take it out; arrow keys slide the selected tile, R (or a double-click) turns it, 1 2 3 change layer. Three layers: ground on pilotis, two above — a tile on an upper layer needs a module below it.</p>
     <h2 class="eyebrow" style="margin-top:16px">The building</h2>
     <label class="chk"><input type="checkbox" data-opt="fuse" checked> Fuse the modules — they morph into each other across the seams</label>
-    <label class="chk"><input type="checkbox" data-opt="walls"> Garden walls (separate modules only)</label>
     <label class="chk"><input type="checkbox" data-opt="cores" checked> Cores where modules stack, grown into the body</label>
     <label class="chk"><input type="checkbox" data-opt="labels" checked> Letters over the modules</label>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="png">Picture · PNG</button><button type="button" class="btn quiet" data-v="plan">Plan · PNG</button><button type="button" class="btn quiet" data-v="glb">Model · GLB</button><button type="button" class="btn quiet" data-v="obj">Model · OBJ</button></div>
@@ -755,11 +745,9 @@ export function mount(root) {
   $$('[data-layer]', root).forEach(bt => bt.addEventListener('click', () => { A.layer = +bt.dataset.layer; A.sel = null; renderBoard(false); applyHighlight(); }));
   $$('[data-view]', root).forEach(bt => bt.addEventListener('click', () => setView(bt.dataset.view)));
   R.auto.addEventListener('click', () => { pushHistory(); autoArrange(); });
-  R.fill.addEventListener('click', () => { pushHistory(); fillFloor(0); setTimeout(() => setView('aerial'), 200); });
   R.shuffle.addEventListener('click', () => scramble(A.layer));
   R.clear.addEventListener('click', () => { pushHistory(); clearLayer(A.layer); A.sel = null; renderBoard(); build(); });
   R.undo.addEventListener('click', undo); R.redo.addEventListener('click', redo);
-  R.rotate.addEventListener('click', () => { if (A.sel != null) turn(A.sel); });
   R.remove.addEventListener('click', () => { if (A.sel != null) { pushHistory(); A.boards[A.layer][A.sel] = null; A.sel = null; renderBoard(); build(); } });
   $$('[data-opt]', root).forEach(x => x.addEventListener('change', () => { A.opts[x.dataset.opt] = x.checked; build(); }));
   R.cat.addEventListener('change', () => { A.cat = R.cat.value; A.pick = null; renderPalette(); R.palette.scrollTop = 0; });
