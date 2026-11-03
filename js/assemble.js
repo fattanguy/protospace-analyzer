@@ -6,7 +6,7 @@
    layer stands on pilotis 3 m up and the levels above hold the cabals; lobbies make the public edge on the west,
    offices the cabal floors, gathering spaces the rooms for the whole company; one red stair ties it all together.
 
-   Plan game: the lot is a board of 7 × 3 slots (one module bay each, 31 × 31 m, with a 3 m seam between bays).
+   Plan game: the lot is a board of 7 × 3 slots (one module bay each, 31 × 31 m, with a 1 m seam between bays).
    Modules are tiles — their roof plans — that slide into empty slots; a tile can be turned; the board has three layers
    (ground, level 2, level 3). The 3D building follows the board, fused into one surface: across every seam the two
    neighbours morph into each other (js/fuse.js), a core rises wherever modules stack, and the red stair. A module can
@@ -22,13 +22,13 @@ import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { voxelize } from './voxelize.js';
 import { organicGeometry } from './isosurface.js';
-import { fusedGeometry, morphSeam } from './fuse.js';
+import { fusedGeometry, morphSeam, surfaceNets, taubin } from './fuse.js';
 
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ------------------------------------------------------------------ the site and the board
-const N = 32, LAT = 31 / 30, SLOT_V = 30, GAP_V = 3, PITCH_V = 21, PODIUM_V = 3, MARGIN_V = 2;   // lattice · metres per voxel · bay, seam, layer pitch, pilotis, grid margin (voxels)
+const N = 32, LAT = 31 / 30, SLOT_V = 30, GAP_V = 1, PITCH_V = 20, PODIUM_V = 3, MARGIN_V = 4;   // lattice · metres per voxel · bay, seam (1 m), layer pitch (a 1 m gap over a full-height module), pilotis, grid margin (voxels)
 export const SITE = { length: 250, width: 100, cols: 7, rows: 3, slotX: SLOT_V * LAT, slotZ: SLOT_V * LAT, gapX: GAP_V * LAT, gapZ: GAP_V * LAT };   // x runs north → south, z runs west → east (negative)
 SITE.boardX = SITE.cols * SITE.slotX + (SITE.cols - 1) * SITE.gapX; SITE.boardZ = SITE.rows * SITE.slotZ + (SITE.rows - 1) * SITE.gapZ;
 SITE.x0 = (SITE.length - SITE.boardX) / 2; SITE.z0 = (SITE.width - SITE.boardZ) / 2;                                   // the board sits centred on the lot
@@ -264,17 +264,37 @@ function clearBuilding() {
   const { building, labels } = A.three;
   for (const g of [building, labels]) while (g.children.length) { const o = g.children.pop(); o.traverse?.(c => { if (c.geometry && !c.userData.shared) c.geometry.dispose(); }); }
 }
-/* Columns, deck and letter for a placed module — the parts both building modes share. */
+/* The deck and the pilotis under a ground module, only where it stands: the footprint of its lowest two voxel
+   layers, closed and grown by two voxels so nearby feet share one pad, as a thin slab contoured at half-voxel
+   resolution (so its edge is smooth, not stepped), with a column on a 6 m grid wherever the slab is. */
+function deckFor(t, k, building) {
+  const m = t.mod, n = N, y0 = m.an.bounds.ymin, [c, r] = cellOf(k), o = slotOrigin(c, r);
+  const M0 = -4, W = SLOT_V + 8, idx2 = (s, w) => (s - M0) + W * (w - M0), inside = (s, w) => s >= M0 && w >= M0 && s < M0 + W && w < M0 + W;
+  let mask = new Uint8Array(W * W);
+  for (let z = 0; z < n; z++) for (let x = 0; x < n; x++) if (m.occ[x + n * (y0 + n * z)] || m.occ[x + n * (y0 + 1 + n * z)]) { const [u, v] = latToSlot(x, z, t.rot); if (inside(u - 1, v - 1)) mask[idx2(u - 1, v - 1)] = 1; }
+  const grow = (src, rad, all) => { const out = new Uint8Array(src.length); for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { let n1 = 0, tot = 0; for (let dj = -rad; dj <= rad; dj++) for (let di = -rad; di <= rad; di++) { const I = i + di, J = j + dj; tot++; if (I >= 0 && J >= 0 && I < W && J < W && src[I + W * J]) n1++; } out[i + W * j] = all ? (n1 === tot ? 1 : 0) : (n1 ? 1 : 0); } return out; };
+  mask = grow(grow(mask, 3, false), 1, true);                                     // dilate 3, erode 1: +2 all round, gaps up to 6 voxels bridged
+  if (!mask.some(Boolean)) return;
+  // the slab: the mask at twice the resolution, one cell thick, contoured and smoothed
+  const S = 2 * W + 2, H = 4, occ = new Uint8Array(S * H * S);
+  for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) if (mask[i + W * j]) for (let dj = 0; dj < 2; dj++) for (let di = 0; di < 2; di++) occ[(2 * i + 1 + di) + S * (1 + H * (2 * j + 1 + dj))] = 1;
+  const { pos, index } = surfaceNets(occ, new Int16Array(occ.length), S, H, S); taubin(pos, index, 6);
+  const half = LAT / 2;
+  for (let i = 0; i < pos.length; i += 3) { pos[i] = o.x + ((pos[i] - 0.5) / 2 + M0) * LAT; pos[i + 1] = PODIUM - half / 2 + (pos[i + 1] - 1) * half; pos[i + 2] = o.z - ((pos[i + 2] - 0.5) / 2 + M0) * LAT; }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(index, 1)); g.computeVertexNormals();
+  const deck = new THREE.Mesh(g, SLAB); deck.receiveShadow = deck.castShadow = true; building.add(deck);
+  // the pilotis: a column at every 6 m grid point the slab covers
+  const cols = [];
+  for (let w = M0; w < M0 + W; w++) for (let s2 = M0; s2 < M0 + W; s2++) if (((s2 - 3) % 6 + 6) % 6 === 0 && ((w - 3) % 6 + 6) % 6 === 0 && mask[idx2(s2, w)]) cols.push([o.x + (s2 + 0.5) * LAT, o.z - (w + 0.5) * LAT]);
+  if (!cols.length) return;
+  const geo = new THREE.CylinderGeometry(0.35, 0.35, PODIUM + 0.3, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
+  cols.forEach(([x, z], i) => { tmp.position.set(x, (PODIUM + 0.3) / 2 - 0.3, z); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
+  inst.castShadow = true; building.add(inst);
+}
+/* Deck, pilotis and letter for a placed module — the parts both building modes share. */
 function furnish(t, k, L, tag, building, labels) {
   const [c, r] = cellOf(k);
-  if (L === 0) {                                                                  // pilotis under the ground layer: columns on a 6 m grid, and a deck
-    const o = slotOrigin(c, r), cols = [];
-    for (let x = 3; x < SITE.slotX; x += 6.2) for (let z = 3; z < SITE.slotZ; z += 6) cols.push([o.x + x, o.z - z]);
-    const geo = new THREE.CylinderGeometry(0.35, 0.35, PODIUM + 0.6, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
-    cols.forEach(([x, z], i) => { tmp.position.set(x, (PODIUM + 0.6) / 2 - 0.3, z); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
-    inst.castShadow = true; building.add(inst);
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(SITE.slotX + SITE.gapX, 0.5, SITE.slotZ + SITE.gapZ), SLAB); deck.position.set(o.x + SITE.slotX / 2, PODIUM - 0.25, o.z - SITE.slotZ / 2); deck.receiveShadow = deck.castShadow = true; building.add(deck);
-  }
+  if (L === 0) deckFor(t, k, building);
   if (A.opts.labels) { const sp = label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'); sp.userData.slot = `${L}:${k}`; labels.add(sp); }
 }
 function cores(building) {                                                        // separate modules only: a stair-and-lift tower beside each stack; the first is the red stair (the fused body grows its own)
@@ -301,8 +321,8 @@ function buildFused() {
     for (const [x, z] of [[b.xmin, b.zmin], [b.xmax, b.zmin], [b.xmin, b.zmax], [b.xmax, b.zmax]]) { const [u, v] = latToSlot(x, z, t.rot); minX = Math.min(minX, gx0 + u - 1); maxX = Math.max(maxX, gx0 + u - 1); minZ = Math.min(minZ, gz0 + v - 1); maxZ = Math.max(maxZ, gz0 + v - 1); }
     minY = Math.min(minY, gy0 + b.ymin); maxY = Math.max(maxY, gy0 + b.ymax);
   });
-  const OX = Math.max(0, minX - 2), OY = 0, OZ = Math.max(0, minZ - 2);                                         // y from the ground, so the cores can reach it
-  const DX = maxX < 0 ? 1 : Math.min(GX, maxX + 3) - OX, DY = maxX < 0 ? 1 : Math.min(GY, maxY + 6) - OY, DZ = maxX < 0 ? 1 : Math.min(GZ, maxZ + 3) - OZ;
+  const OX = Math.max(0, minX - 3), OY = 0, OZ = Math.max(0, minZ - 3);                                         // y from the ground, so the cores can reach it
+  const DX = maxX < 0 ? 1 : Math.min(GX, maxX + 4) - OX, DY = maxX < 0 ? 1 : Math.min(GY, maxY + 6) - OY, DZ = maxX < 0 ? 1 : Math.min(GZ, maxZ + 4) - OZ;
   const occ = new Uint8Array(DX * DY * DZ), lab = new Int16Array(DX * DY * DZ);
   const gid = (x, y, z) => x + DX * (y + DY * z);
   const placed = [], bySlot = {};                                                  // placements with their grid bounding boxes
