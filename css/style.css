@@ -455,6 +455,7 @@
 .as-slot:hover { border-color: var(--ink2); } .as-slot.sel { border-color: var(--red); box-shadow: inset 0 0 0 2px var(--red); z-index: 2; }
 .as-slot.empty { cursor: default; } .as-slot.can-slide:hover { box-shadow: inset 0 0 0 2px var(--ink2); }
 .as-slot.nb, .as-slot.nb-hover { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.as-slot.hot { border-color: var(--ink); box-shadow: inset 0 0 0 2px var(--ink); } .as-slot.hot.sel { border-color: var(--red); box-shadow: inset 0 0 0 2px var(--red); }
 .as-slot.over { border-color: var(--red); box-shadow: inset 0 0 0 3px var(--red); background: color-mix(in srgb, var(--red) 18%, #0a0a0a); }
 .as-slot.lifted { opacity: .35; } .as-board.drop-out { box-shadow: 0 0 0 2px var(--red); }
 .as-slot canvas.below { opacity: .22; filter: grayscale(.4); } .as-slot em.below-tag { color: var(--ink3); text-shadow: none; font-weight: 500; letter-spacing: .06em; font-size: 9px; }
@@ -486,7 +487,8 @@
 .as-compass { position: absolute; left: 12px; bottom: 10px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #9a9a9a; }
 .as-compass button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: #e8e8e8; background: transparent; border: 1px solid #4e4e4e; padding: 3px 8px; margin-left: 4px; cursor: pointer; } .as-compass button:hover { background: #e8e8e8; color: #000; }
 .as-callouts { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 22px; margin-top: 8px; }
-.as-call { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+.as-call { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 6px; margin: 0 -6px; border-bottom: 1px solid var(--rule); font-size: 13px; cursor: pointer; transition: background .15s; }
+.as-call:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); } .as-call.on { background: color-mix(in srgb, var(--red) 14%, transparent); box-shadow: inset 3px 0 0 var(--red); }
 .as-call b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: #fff; font-weight: 600; font-size: 13px; }
 .as-call .n { color: var(--ink); } .as-call .n small { color: var(--ink3); font-size: 12px; }
 @media (max-width: 900px) { .as { grid-template-columns: 1fr; } .xp-controls.as-controls { position: static; max-height: none; } .as-viewer canvas { height: 380px; } }

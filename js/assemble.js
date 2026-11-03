@@ -9,9 +9,9 @@
    Plan game: the lot is a board of 7 × 3 slots (one module bay each, 31 × 31 m, with a 3 m seam between bays).
    Modules are tiles — their roof plans — that slide into empty slots; a tile can be turned; the board has three layers
    (ground, level 2, level 3). The 3D building follows the board, fused into one surface: across every seam the two
-   neighbours morph into each other (js/fuse.js), a bridge is added only where floors meet but no mass does, windows
-   are cut in the thin walls, a core rises wherever modules stack, and the red stair. Every module carries a callout of what it is and where
-   it came from (animation, frame, bay — or the Explorer map and tile it was taken from).
+   neighbours morph into each other (js/fuse.js), a core rises wherever modules stack, and the red stair. A module can
+   be picked on the board, in the callout list or by clicking it in the 3D view; it lights up in all three. Every module
+   carries a callout of what it is and where it came from (animation, frame, bay — or the Explorer map and tile).
 
    mount(root) → { show, addModule({ name, occ, N, note, use }) } ; the Explorer sends tiles with addModule. */
 import * as THREE from 'three';
@@ -46,13 +46,13 @@ const gridBase = (c, r, L) => ({ gx0: MARGIN_V + c * (SLOT_V + GAP_V), gz0: MARG
 
 const A = {
   modules: [], boards: [[], [], []], layer: 0, sel: null, pick: null, custom: 0,
-  three: null, ready: false, pairs: null, uid: 0, history: [], future: [], hover: null, opts: { fuse: true, bridges: true, walls: false, windows: true, cores: true, labels: true },
+  three: null, ready: false, pairs: null, uid: 0, history: [], future: [], hover: null, opts: { fuse: true, walls: false, cores: true, labels: true },
 };
 for (let L = 0; L < 3; L++) A.boards[L] = Array.from({ length: SITE.cols * SITE.rows }, () => null);   // { mod, rot }
 let R = {};
 
-// ------------------------------------------------------------------ modules: geometry in metres, voxels for plans, floors and windows
-function analyse(occ, n) {                                                       // floors, roof heights, edge ports and window panels of a voxel solid
+// ------------------------------------------------------------------ modules: geometry in metres, voxels for plans and floors
+function analyse(occ, n) {                                                       // floors, roof heights and edge ports of a voxel solid
   const at = (x, y, z) => x >= 0 && y >= 0 && z >= 0 && x < n && y < n && z < n && occ[x + n * (y + n * z)];
   const roof = new Int8Array(n * n).fill(-1), floors = [];                          // roof[x + n z] = top voxel; floors = [x, y, z] standable cells
   let xmin = n, xmax = 0, zmin = n, zmax = 0, ymin = n, ymax = 0, cells = 0;
@@ -66,20 +66,7 @@ function analyse(occ, n) {                                                      
     if (x >= xmax - 2) (ports.px[y] ||= []).push(z); if (x <= xmin + 2) (ports.nx[y] ||= []).push(z);
     if (z >= zmax - 2) (ports.pz[y] ||= []).push(x); if (z <= zmin + 2) (ports.nz[y] ||= []).push(x);
   }
-  // windows: exterior faces of thin walls (air outside for two voxels, air within two voxels behind, a wall not a slab),
-  // kept only at the two voxel rows that fall mid-floor (so they read as strip windows, one band per storey)
-  const panels = [];
-  for (let z = 0; z < n; z++) for (let y = 1; y < n; y++) for (let x = 0; x < n; x++) {
-    if (!at(x, y, z) || !(at(x, y + 1, z) || at(x, y - 1, z))) continue;
-    if (!(at(x, y + 1, z) && at(x, y - 1, z))) continue;                            // a wall voxel with wall above and below (not a slab edge)
-    if ((y % 3) !== 1) continue;                                                     // one band per 3 m storey
-    for (const [dx, dz, side] of [[1, 0, 'px'], [-1, 0, 'nx'], [0, 1, 'pz'], [0, -1, 'nz']]) {
-      if (at(x + dx, y, z + dz) || at(x + 2 * dx, y, z + 2 * dz)) continue;
-      if (at(x - dx, y, z - dz) && at(x - 2 * dx, y, z - 2 * dz)) continue;
-      panels.push([x, y, z, side]);
-    }
-  }
-  return { roof, floors, ports, panels, bounds: { xmin, xmax, zmin, zmax, ymin, ymax }, cells };
+  return { roof, floors, ports, bounds: { xmin, xmax, zmin, zmax, ymin, ymax }, cells };
 }
 async function loadBuiltins() {
   const index = await (await fetch('assets/spaces/index.json')).json(), loader = new GLTFLoader();
@@ -125,6 +112,7 @@ function shade(hex, t) { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(h
 const idx = (c, r) => c + SITE.cols * r;
 function cellOf(k) { return [k % SITE.cols, (k / SITE.cols) | 0]; }
 function place(L, k, mod, rot = 1) { A.boards[L][k] = { mod, rot, uid: ++A.uid }; }
+A.boardAt = ({ L, k }) => A.boards[L][k];
 function clearLayer(L) { A.boards[L] = A.boards[L].map(() => null); }
 function moveTile(L, from, to) { const b = A.boards[L]; if (b[to]) [b[from], b[to]] = [b[to], b[from]]; else { b[to] = b[from]; b[from] = null; } }
 function adjacent(a, b) { const [ca, ra] = cellOf(a), [cb, rb] = cellOf(b); return Math.abs(ca - cb) + Math.abs(ra - rb) === 1; }
@@ -161,7 +149,7 @@ function fillFloor(L = 0) {
   A.sel = null; renderBoard(); build();
 }
 
-// ------------------------------------------------------------------ connections: bridges, walls, cores
+// ------------------------------------------------------------------ connections: seams, walls, cores
 /* The module's lattice side facing a world direction, given its quarter turns. Lattice: +x, −x across; z = 0 front,
    z = n back. The mesh's local z is −lattice z. At rot 0 local +x → world +x (south), local −z (front) → world −z (east). */
 const FACE = { 0: { S: 'px', N: 'nx', E: 'pz', W: 'nz' }, 1: { E: 'px', W: 'nx', S: 'nz', N: 'pz' }, 2: { N: 'px', S: 'nx', W: 'pz', E: 'nz' }, 3: { W: 'px', E: 'nx', N: 'nz', S: 'pz' } };
@@ -189,9 +177,9 @@ function stacks() {                                                             
 }
 function pairsOf(L) {                                                             // neighbour pairs on a layer, with whether they are joined
   if (A.pairs) return A.pairs.filter(p => p.L === L);
-  return connections(L).map(cn => ({ ...cn, joined: A.opts.bridges && cn.levels.length > 0, through: false }));
+  return connections(L).map(cn => ({ ...cn, joined: false, through: false }));
 }
-function connectedGroups() {                                                      // modules joined by seams, bridges and stacking (through a core)
+function connectedGroups() {                                                      // modules joined by morphed seams and by stacking (through a core)
   const nodes = [], id = new Map();
   for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (t) { id.set(`${L}:${k}`, nodes.length); nodes.push(`${L}:${k}`); } });
   const parent = nodes.map((_, i) => i), find = i => parent[i] === i ? i : (parent[i] = find(parent[i])), union = (a, b) => { parent[find(a)] = find(b); };
@@ -229,13 +217,10 @@ function initThree(canvas) {
 }
 const MATS = {};
 function matFor(use) { if (!MATS[use]) { const c = new THREE.Color(0xe9e5de).lerp(new THREE.Color(USE[use] ? USE[use].c : '#888'), 0.22); MATS[use] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }); } return MATS[use]; }
-const GLASS = new THREE.MeshPhysicalMaterial({ color: 0x9fc3d6, roughness: 0.15, metalness: 0, transmission: 0.55, transparent: true, opacity: 0.75, side: THREE.DoubleSide });
-const FRAME = new THREE.MeshStandardMaterial({ color: 0x2e2e2e, roughness: 0.6 });
 const SLAB = new THREE.MeshStandardMaterial({ color: 0xbdb7ae, roughness: 0.95 });
 const RED = new THREE.MeshStandardMaterial({ color: 0xc62828, roughness: 0.7 });
 const CORE = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.85 });
 const COLUMN = new THREE.MeshStandardMaterial({ color: 0xcfcac2, roughness: 0.9 });
-const WINDOW = new THREE.MeshStandardMaterial({ color: 0x16222a, roughness: 0.15, metalness: 0.4, emissive: 0x1a2c38, emissiveIntensity: 0.5, side: THREE.DoubleSide });
 
 /* The transform that puts a module's local frame (x 0…27, y 0…19, z −31…0) into its slot at a layer with a rotation. */
 function placement(k, L, rot, geo) {
@@ -265,7 +250,7 @@ function furnish(t, k, L, tag, building, labels) {
     inst.castShadow = true; building.add(inst);
     const deck = new THREE.Mesh(new THREE.BoxGeometry(SITE.slotX + SITE.gapX, 0.5, SITE.slotZ + SITE.gapZ), SLAB); deck.position.set(o.x + SITE.slotX / 2, PODIUM - 0.25, o.z - SITE.slotZ / 2); deck.receiveShadow = deck.castShadow = true; building.add(deck);
   }
-  if (A.opts.labels) labels.add(label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'));
+  if (A.opts.labels) { const sp = label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'); sp.userData.slot = `${L}:${k}`; labels.add(sp); }
 }
 function cores(building) {                                                        // wherever modules stack, a stair-and-lift tower at the slot's north-west corner; the first is the red stair
   if (!A.opts.cores) return;
@@ -275,7 +260,6 @@ function cores(building) {                                                      
     if (i === 0) { const cap = new THREE.Mesh(new THREE.BoxGeometry(7, 0.4, 6), RED); cap.position.set(ctr.x - 6, h + 0.2, ctr.z + 5); building.add(cap); }
   });
 }
-const WDIR = { S: [1, 0, 0, Math.PI / 2], N: [-1, 0, 0, -Math.PI / 2], E: [0, 0, -1, Math.PI], W: [0, 0, 1, 0] };   // world direction → offset and plane rotation
 function build() {
   if (!A.three) return;
   clearTimeout(A.buildTimer); if (R.stats) R.stats.classList.add('busy');
@@ -330,17 +314,7 @@ function buildFused() {
     if (east && east.bb.maxX >= 0) { const cn = cns[P.L].find(x => x.a === P.k && x.b === P.k + SITE.cols); const through = seam(P, east, 2); pairs.push({ L: P.L, a: P.k, b: P.k + SITE.cols, axis: 'z', levels: cn ? cn.levels : [], through, joined: through }); }
     if (up && up.bb.maxX >= 0) seam(P, up, 1);
   }
-  // bridges only where a seam did not join two neighbours but they share a floor height
-  const links = [];
-  for (const pr of pairs) {
-    if (!pr.through && A.opts.bridges && pr.levels.length) {
-      const [ca, ra] = cellOf(pr.a), [cb, rb] = cellOf(pr.b), A0 = slotOrigin(ca, ra), B0 = slotOrigin(cb, rb), y0 = PODIUM + pr.L * PITCH;
-      if (pr.axis === 'x') pr.levels.forEach((lv, i) => bridge(building, A0.x + SITE.slotX - 1.5, B0.x + 1.5, y0 + lv.y * LAT, A0.z - SITE.slotZ / 2 + (i ? 6 : -4), 'x'));
-      else pr.levels.forEach((lv, i) => bridge(building, A0.z - SITE.slotZ + 1.5, B0.z - 1.5, y0 + lv.y * LAT, A0.x + SITE.slotX / 2 + (i ? 6 : -4), 'z'));
-      pr.joined = true;
-    }
-    links.push({ L: pr.L, through: pr.through, bridged: pr.joined && !pr.through });
-  }
+  const links = pairs.map(pr => ({ L: pr.L, through: pr.through }));
   A.pairs = pairs;
   // the surface
   if (placed.length) {
@@ -351,25 +325,16 @@ function buildFused() {
     P.needsUpdate = true; g.computeVertexNormals(); g.computeBoundingSphere();
     const mesh = new THREE.Mesh(g, FUSED); mesh.castShadow = mesh.receiveShadow = true; mesh.name = 'Valve HQ · fused'; building.add(mesh);
   }
-  // windows, columns, decks, letters, cores
+  // columns, decks, letters, cores
   for (const P of placed) {
-    const { t, k, L, c, r } = P;
-    if (A.opts.windows && t.mod.an.panels.length) {
-      const { gx0, gy0, gz0 } = gridBase(c, r, L), inv = Object.fromEntries(Object.entries(FACE[t.rot]).map(([d, side]) => [side, d]));
-      const geo = new THREE.PlaneGeometry(1.0 * LAT, 0.62 * LAT), inst = new THREE.InstancedMesh(geo, WINDOW, t.mod.an.panels.length), tmp = new THREE.Object3D();
-      t.mod.an.panels.forEach(([x, y, z, side], i) => {
-        const [u, v] = latToSlot(x, z, t.rot), d = WDIR[inv[side]];
-        tmp.position.set(gridX(gx0 + u - 1) + d[0] * 0.66 * LAT, gridY(gy0 + y), gridZ(gz0 + v - 1) + d[2] * 0.66 * LAT); tmp.rotation.set(0, d[3], 0); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix);
-      });
-      inst.instanceMatrix.needsUpdate = true; building.add(inst);
-    }
+    const { t, k, L } = P;
     furnish(t, k, L, P.tag, building, labels);
   }
   cores(building);
   A.three.callouts = callouts; A.three.links = links; A.three.placed = placed;
   applyHighlight();
 }
-/* The older building: every module its own mesh in its bay, bridges and garden walls between. */
+/* The older building: every module its own mesh in its bay, garden walls between at ground. */
 function buildSeparate() {
   const { building, labels } = A.three; clearBuilding(); A.pairs = null;
   const callouts = [];
@@ -377,19 +342,9 @@ function buildSeparate() {
   for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => {
     if (!t) return;
     const M = placement(k, L, t.rot, t.mod.geo);
-    const mesh = new THREE.Mesh(t.mod.geo, matFor(t.mod.use)); mesh.applyMatrix4(M); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.shared = true; mesh.name = `${t.mod.id} ${t.mod.name}`; building.add(mesh);
+    const mesh = new THREE.Mesh(t.mod.geo, matFor(t.mod.use)); mesh.applyMatrix4(M); mesh.castShadow = mesh.receiveShadow = true; mesh.userData.shared = true; mesh.userData.slot = { L, k }; mesh.name = `${t.mod.id} ${t.mod.name}`; building.add(mesh);
     const [c, r] = cellOf(k), tag = LETTERS[letter++ % LETTERS.length];
     callouts.push({ tag, L, c, r, t });
-    if (A.opts.windows && t.mod.an.panels.length) {
-      const geo = new THREE.PlaneGeometry(1.0 * LAT, 0.62 * LAT), inst = new THREE.InstancedMesh(geo, WINDOW, t.mod.an.panels.length), tmp = new THREE.Object3D();
-      const rotFor = { px: [0, Math.PI / 2, 0], nx: [0, -Math.PI / 2, 0], pz: [0, Math.PI, 0], nz: [0, 0, 0] };
-      t.mod.an.panels.forEach(([x, y, z, side], i) => {
-        const [lx, ly, lz] = latticeToLocal(t.mod, x, y, z);
-        const off = { px: [LAT * 0.52, 0, 0], nx: [-LAT * 0.52, 0, 0], pz: [0, 0, -LAT * 0.52], nz: [0, 0, LAT * 0.52] }[side];
-        tmp.position.set(lx + off[0], ly, lz + off[2]); tmp.rotation.set(...rotFor[side]); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix);
-      });
-      inst.applyMatrix4(M); inst.instanceMatrix.needsUpdate = true; building.add(inst);
-    }
     furnish(t, k, L, tag, building, labels);
   });
   const links = [];
@@ -397,25 +352,16 @@ function buildSeparate() {
     const [ca, ra] = cellOf(cn.a), [cb, rb] = cellOf(cn.b), A0 = slotOrigin(ca, ra), B0 = slotOrigin(cb, rb), y0 = PODIUM + L * PITCH;
     if (cn.axis === 'x') {
       const x0 = A0.x + SITE.slotX, x1 = B0.x, zc = A0.z - SITE.slotZ / 2;
-      if (A.opts.bridges && cn.levels.length) cn.levels.forEach((lv, i) => bridge(building, x0 - 1.5, x1 + 1.5, y0 + lv.y * LAT, zc + (i ? 6 : -4), 'x'));
-      else if (A.opts.walls && L === 0) wall(building, x0, x1, y0, zc, 'x');
+      if (A.opts.walls && L === 0) wall(building, x0, x1, y0, zc, 'x');
     } else {
       const z0 = A0.z - SITE.slotZ, z1 = B0.z, xc = A0.x + SITE.slotX / 2;
-      if (A.opts.bridges && cn.levels.length) cn.levels.forEach((lv, i) => bridge(building, z0 + 1.5, z1 - 1.5, y0 + lv.y * LAT, xc + (i ? 6 : -4), 'z'));
-      else if (A.opts.walls && L === 0) wall(building, z1, z0, y0, xc, 'z');
+      if (A.opts.walls && L === 0) wall(building, z1, z0, y0, xc, 'z');
     }
-    links.push({ L, through: false, bridged: A.opts.bridges && cn.levels.length > 0 });
+    links.push({ L, through: false });
   }
   cores(building);
   A.three.callouts = callouts; A.three.links = links; A.three.placed = null;
-}
-function bridge(group, a0, a1, y, across, axis) {                                 // a glazed link, 4 m wide, 3.3 m tall, from a0 to a1 along the axis
-  const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2, W = 4, H = 3.3;
-  const parts = [[new THREE.BoxGeometry(len, 0.35, W), SLAB, 0.17], [new THREE.BoxGeometry(len, 0.25, W + 0.4), FRAME, H - 0.12], [new THREE.BoxGeometry(len, H - 0.6, 0.08), GLASS, H / 2, W / 2 - 0.1], [new THREE.BoxGeometry(len, H - 0.6, 0.08), GLASS, H / 2, -(W / 2 - 0.1)]];
-  for (const [geo, mat, dy, dz = 0] of parts) {
-    const m = new THREE.Mesh(geo, mat); if (axis === 'x') m.position.set(mid, y + dy, across + dz); else { m.rotation.y = Math.PI / 2; m.position.set(across + dz, y + dy, mid); }
-    m.castShadow = mat !== GLASS; m.receiveShadow = true; group.add(m);
-  }
+  applyHighlight();
 }
 function wall(group, a0, a1, y, across, axis) {                                   // a garden wall closing the gap at ground, with a door-sized gap left in it
   const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2, h = 3.2;
@@ -487,7 +433,7 @@ function tileInfo(L, k) {                                                       
   for (const pr of pairsOf(L)) {
     if (pr.a !== k && pr.b !== k) continue; const other = A.boards[L][pr.a === k ? pr.b : pr.a]; if (!other) continue;
     const dir = pr.axis === 'x' ? (pr.a === k ? 'S' : 'N') : (pr.a === k ? 'E' : 'W');
-    lines.push(pr.through ? `morphs into ${esc(other.mod.id)} ${esc(other.mod.name)} to the ${names[dir]}` : pr.joined ? `bridge to ${esc(other.mod.id)} ${esc(other.mod.name)} to the ${names[dir]} at ${pr.levels.map(l => Math.round(l.y * LAT) + ' m').join(', ')}` : `beside ${esc(other.mod.id)} to the ${names[dir]} — no floor meets, open seam`);
+    lines.push(pr.through ? `morphs into ${esc(other.mod.id)} ${esc(other.mod.name)} to the ${names[dir]}` : `beside ${esc(other.mod.id)} ${esc(other.mod.name)} to the ${names[dir]} — no mass meets, open seam`);
   }
   const below = L > 0 && A.boards[L - 1][k], above = L < 2 && A.boards[L + 1][k];
   if (below) lines.push(`stacked on ${esc(below.mod.id)} ${esc(below.mod.name)}`); else if (L > 0) lines.push('<i>nothing below — it floats; stack it on a module</i>');
@@ -495,9 +441,9 @@ function tileInfo(L, k) {                                                       
   if (!lines.some((l, i) => i > 0 && !/float/.test(l))) lines.push('<i>no neighbours yet — slide it next to another module</i>');
   return lines.join('<br>');
 }
-function showTip(L, k, slot) {                                                      // under the tile (above it near the bottom of the window), never over its neighbours' row
+function showTip(L, k, at) {                                                        // under the tile (above it near the bottom of the window), or under a point in the 3D view
   R.tip.innerHTML = tileInfo(L, k); R.tip.hidden = false;
-  const r = R.tip.getBoundingClientRect(), s = slot.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+  const r = R.tip.getBoundingClientRect(), s = at.getBoundingClientRect ? at.getBoundingClientRect() : { left: at.x - 8, top: at.y - 12, bottom: at.y + 12 }, vw = window.innerWidth, vh = window.innerHeight;
   R.tip.style.left = `${Math.max(8, Math.min(s.left, vw - r.width - 12))}px`;
   R.tip.style.top = `${s.bottom + 10 + r.height > vh - 8 ? s.top - r.height - 10 : s.bottom + 10}px`;
 }
@@ -528,18 +474,40 @@ function renderScore() {
     <div class="as-bars">${sc.parts.map(([n, v, h]) => `<div class="as-bar" title="${esc(h)}"><span>${n}</span><i><b style="width:${v.toFixed(0)}%"></b></i><em>${v.toFixed(0)}</em></div>`).join('')}</div>
     <div class="as-goals"><div class="eyebrow">Goals · ${done} of ${sc.goals.length}</div>${sc.goals.map(([n, ok]) => `<div class="${ok ? 'ok' : ''}"><i>${ok ? '✓' : '○'}</i>${n}</div>`).join('')}</div>`;
 }
-/* The selected (or hovered) module lit in the 3D view: its part of the fused body brightens, the rest dims a little. */
+/* The picked module — hovered, or else selected — lit everywhere: its part of the fused body brightens while the rest
+   dims and greys, its letter grows, its tile and its callout are marked. (With separate modules, its mesh brightens.) */
+const HI = {};
+function hiMat(use) { if (!HI[use]) { const m = matFor(use).clone(); m.color.lerp(new THREE.Color(0xffffff), 0.45); m.emissive = new THREE.Color(0x3a2a28); HI[use] = m; } return HI[use]; }
+function pickedSlot() { return A.hover || (A.sel != null ? `${A.layer}:${A.sel}` : null); }
 function applyHighlight() {
   const T = A.three; if (!T || !T.building) return;
-  const mesh = T.building.children.find(o => o.name === 'Valve HQ · fused'); if (!mesh) return;
-  const g = mesh.geometry, labels = g.userData.labels, base = g.userData.baseColor, col = g.getAttribute('color'); if (!labels) return;
-  const want = A.hover || (A.sel != null ? `${A.layer}:${A.sel}` : null), P = want && (T.placed || []).find(p => `${p.L}:${p.k}` === want), pid = P ? P.pid : 0;
-  const arr = col.array;
-  for (let v = 0, n = labels.length; v < n; v++) {
-    const hit = labels[v] === pid, f = pid ? (hit ? 1.0 : 0.72) : 1.0, lift = pid && hit ? 0.35 : 0;
-    for (let c = 0; c < 3; c++) { const b = base[v * 3 + c]; arr[v * 3 + c] = b * f + lift * (1 - b); }
-  }
-  col.needsUpdate = true;
+  const want = pickedSlot(), P = want && (T.placed || []).find(p => `${p.L}:${p.k}` === want), pid = P ? P.pid : 0;
+  const mesh = T.building.children.find(o => o.name === 'Valve HQ · fused');
+  if (mesh) {
+    const g = mesh.geometry, labels = g.userData.labels, base = g.userData.baseColor, col = g.getAttribute('color'), arr = col.array;
+    if (labels) {
+      for (let v = 0, n = labels.length; v < n; v++) {
+        const hit = labels[v] === pid, f = pid ? (hit ? 1.0 : 0.66) : 1.0, lift = pid && hit ? 0.42 : 0;
+        for (let c = 0; c < 3; c++) { const b = base[v * 3 + c]; let x = b * f + lift * (1 - b); if (pid && !hit) { const grey = 0.299 * base[v * 3] + 0.587 * base[v * 3 + 1] + 0.114 * base[v * 3 + 2]; x = (x + grey * f) / 2; } arr[v * 3 + c] = x; }
+      }
+      col.needsUpdate = true;
+    }
+  } else T.building.children.forEach(o => { const t = o.userData.slot && A.boardAt(o.userData.slot); if (t) o.material = `${o.userData.slot.L}:${o.userData.slot.k}` === want ? hiMat(t.mod.use) : matFor(t.mod.use); });
+  T.labels.children.forEach(sp => { const on = want && sp.userData.slot === want; sp.scale.set(on ? 9 : 6, on ? 9 : 6, 1); sp.material.opacity = want && !on ? 0.55 : 1; sp.material.transparent = true; });
+  $$('.as-slot.hot', R.board).forEach(x => x.classList.remove('hot')); if (want && want.split(':')[0] == A.layer) { const el = R.board.querySelector(`.as-slot[data-k="${want.split(':')[1]}"]`); if (el) el.classList.add('hot'); }
+  $$('.as-call', R.callouts).forEach(x => x.classList.toggle('on', x.dataset.slot === want));
+}
+/* Picking in the 3D view: the ray through the pointer, the face it hits, the module that face belongs to. */
+function pick3d(x, y) {
+  const T = A.three; if (!T) return null;
+  const rect = T.canvas.getBoundingClientRect(), v = new THREE.Vector2(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
+  const ray = T.ray || (T.ray = new THREE.Raycaster()); ray.setFromCamera(v, T.camera);
+  const targets = T.building.children.filter(o => o.name === 'Valve HQ · fused' || o.userData.slot);
+  const hit = ray.intersectObjects(targets, false)[0]; if (!hit) return null;
+  if (hit.object.userData.slot) return hit.object.userData.slot;
+  const labels = hit.object.geometry.userData.labels, f = hit.face; if (!labels || !f) return null;
+  const votes = [labels[f.a], labels[f.b], labels[f.c]], pid = votes.sort((u, w) => votes.filter(q => q === w).length - votes.filter(q => q === u).length)[0];
+  const P = (T.placed || []).find(p => p.pid === pid); return P ? { L: P.L, k: P.k } : null;
 }
 function focusOn(L, k) {                                                            // the camera target glides to the module
   const T = A.three; if (!T) return; const [c, r] = cellOf(k), ctr = slotCentre(c, r), to = new THREE.Vector3(ctr.x, PODIUM + L * PITCH + MOD_H * 0.45, ctr.z);
@@ -559,7 +527,7 @@ function renderBoard(animate = true) {
     const cls = ['as-slot', t ? '' : 'empty', A.sel === k ? 'sel' : '', nb.includes(k) ? 'nb' : '', floats ? 'float' : '', slideable ? 'can-slide' : ''].filter(Boolean).join(' ');
     return `<div class="${cls}" data-k="${k}"${t ? ` data-uid="${t.uid}"` : ''} style="grid-column:${c + 1};grid-row:${r + 1}">${t ? `<canvas width="120" height="120"></canvas><em>${esc(t.mod.id)}</em>${floats ? '<s title="nothing below: it floats">⚠</s>' : ''}` : under ? `<canvas class="below" width="120" height="120"></canvas><em class="below-tag">below · ${esc(under.mod.id)}</em>` : ''}</div>`;
   }).join('')
-    + prs.map(x => { const [c, r] = cellOf(x.a); const cls = x.through ? ' fused' : x.joined ? '' : ' wall'; const title = x.through ? 'the two modules morph into each other across the seam' : x.joined ? `bridge at ${x.levels.map(l => Math.round(l.y * LAT) + ' m').join(', ')}` : 'no shared floor: the seam stays open'; return `<i class="as-link ${x.axis}${cls}" style="--c:${c};--r:${r}" title="${title}"></i>`; }).join('');
+    + prs.map(x => { const [c, r] = cellOf(x.a); const cls = x.through ? ' fused' : ' wall'; const title = x.through ? 'the two modules morph into each other across the seam' : 'no mass meets: the seam stays open'; return `<i class="as-link ${x.axis}${cls}" style="--c:${c};--r:${r}" title="${title}"></i>`; }).join('');
   $$('.as-slot canvas', R.board).forEach(cv => { const k = +cv.parentElement.dataset.k, t = cv.classList.contains('below') ? below[k] : b[k]; cv.getContext('2d').drawImage(planOf(t.mod, t.rot), 0, 0); });
   if (before) glide(before);
   renderStats(); renderScore(); save();
@@ -567,14 +535,14 @@ function renderBoard(animate = true) {
 function renderStats() {
   const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, som: 0 }; let area = 0;
   for (let l = 0; l < 3; l++) A.boards[l].forEach(t => { if (!t) return; uses[t.mod.use]++; area += t.mod.an.floors.length * LAT * LAT; });
-  const hint = g.modules ? (g.groups === 1 ? 'Every module is reachable — the seams, bridges and cores join them all.' : `${g.groups} separate groups: slide a module beside another, or stack one, to join them.`) : 'Drag a module from the palette onto a bay, or click one then click a bay.';
+  const hint = g.modules ? (g.groups === 1 ? 'Every module is reachable — the seams and cores join them all.' : `${g.groups} separate groups: slide a module beside another, or stack one, to join them.`) : 'Drag a module from the palette onto a bay, or click one then click a bay.';
   R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of floor · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.som ? ` · ${uses.som} from the map` : ''}<br><span class="hint">${hint}</span>`;
 }
 function renderCallouts() {
   const cs = A.three && A.three.callouts || [];
-  R.callouts.innerHTML = cs.length ? cs.map(({ tag, L, c, r, t }) => `<div class="as-call"><b style="background:${USE[t.mod.use] ? USE[t.mod.use].c : '#888'}">${tag}</b><div><div class="n">${esc(t.mod.id)} ${esc(t.mod.name)} <small>· ${esc(t.mod.typology)}</small></div><div class="hint">Bay ${'ABCDEFG'[c]}${r + 1} · ${LAYERS[L].split(' ·')[0]} · turned ${t.rot * 90}° · ${esc(t.mod.note)}</div></div></div>`).join('') : '<p class="hint">The building follows the board: place modules to see them here, each with where it came from.</p>';
-  const links = A.three && A.three.links || [], nf = links.filter(l => l.through).length, nb = links.filter(l => l.bridged).length, no = links.length - nf - nb;
-  R.linkNote.textContent = links.length ? `${nf} seams where neighbours morph into each other, ${nb} bridges where they share a floor height but no mass meets, ${no} open seams, ${stacks().length} cores where modules stack (the first is the red stair).` : '';
+  R.callouts.innerHTML = cs.length ? cs.map(({ tag, L, c, r, t }) => `<div class="as-call" data-slot="${L}:${idx(c, r)}" title="click to select the module"><b style="background:${USE[t.mod.use] ? USE[t.mod.use].c : '#888'}">${tag}</b><div><div class="n">${esc(t.mod.id)} ${esc(t.mod.name)} <small>· ${esc(t.mod.typology)}</small></div><div class="hint">Bay ${'ABCDEFG'[c]}${r + 1} · ${LAYERS[L].split(' ·')[0]} · turned ${t.rot * 90}° · ${esc(t.mod.note)}</div></div></div>`).join('') : '<p class="hint">The building follows the board: place modules to see them here, each with where it came from.</p>';
+  const links = A.three && A.three.links || [], nf = links.filter(l => l.through).length, no = links.length - nf;
+  R.linkNote.textContent = links.length ? `${nf} seams where neighbours morph into each other, ${no} open seams, ${stacks().length} cores where modules stack (the first is the red stair).` : '';
 }
 function download(blob, name) { const u = URL.createObjectURL(blob), a = document.createElement('a'); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); }
 function planPicture() {                                                          // the board as a site plan, for the deck
@@ -606,9 +574,7 @@ const HTML = `
     <p class="hint">It is a sliding puzzle: click a tile with one empty bay beside it and it slides there; drag any tile to any bay (onto another tile to swap); drag it off the board to take it out; arrow keys slide the selected tile, R turns it, 1 2 3 change layer. Three layers: ground on pilotis, two above — a tile on an upper layer needs a module below it.</p>
     <h2 class="eyebrow" style="margin-top:16px">The building</h2>
     <label class="chk"><input type="checkbox" data-opt="fuse" checked> Fuse the modules — they morph into each other across the seams</label>
-    <label class="chk"><input type="checkbox" data-opt="bridges" checked> Bridges where floors meet but no mass does</label>
     <label class="chk"><input type="checkbox" data-opt="walls"> Garden walls (separate modules only)</label>
-    <label class="chk"><input type="checkbox" data-opt="windows" checked> Windows in the thin walls</label>
     <label class="chk"><input type="checkbox" data-opt="cores" checked> Cores where modules stack</label>
     <label class="chk"><input type="checkbox" data-opt="labels" checked> Letters over the modules</label>
     <div class="xp-row"><button type="button" class="btn quiet" data-v="png">Picture · PNG</button><button type="button" class="btn quiet" data-v="plan">Plan · PNG</button><button type="button" class="btn quiet" data-v="glb">Model · GLB</button><button type="button" class="btn quiet" data-v="obj">Model · OBJ</button></div>
@@ -670,6 +636,28 @@ export function mount(root) {
   R.palette.addEventListener('pointerdown', e => { const bt = e.target.closest('[data-pick]'); if (!bt) return; startDrag(e, { src: 'palette', id: bt.dataset.pick, canvas: bt.querySelector('canvas') }); });
   R.board.addEventListener('pointerdown', e => { const slot = e.target.closest('.as-slot'); if (!slot) return; R.board.focus({ preventScroll: true }); const k = +slot.dataset.k; if (slot.classList.contains('empty')) { startDrag(e, { src: 'empty', k, canvas: null }); return; } startDrag(e, { src: 'board', k, canvas: slot.querySelector('canvas') }); });
   R.board.addEventListener('dblclick', e => { const slot = e.target.closest('.as-slot'); if (!slot || slot.classList.contains('empty')) return; turn(+slot.dataset.k); });
+  // ---- picking in the 3D view
+  let p3 = null, hoverRaf = 0;
+  const goTo = slot => { if (A.layer !== slot.L) A.layer = slot.L; A.sel = slot.k; A.hover = null; renderBoard(false); applyHighlight(); };
+  R.canvas.addEventListener('pointerdown', e => { p3 = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  R.canvas.addEventListener('pointerup', e => {
+    const d = p3; p3 = null; if (!d || e.button !== 0 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;    // a still press is a click; a drag is the orbit
+    const hit = pick3d(e.clientX, e.clientY);
+    if (hit) { if (A.sel === hit.k && A.layer === hit.L) select(null); else goTo(hit); } else select(null);
+  });
+  R.canvas.addEventListener('pointermove', e => {
+    if (p3 || drag) return; const x = e.clientX, y = e.clientY;
+    cancelAnimationFrame(hoverRaf); hoverRaf = requestAnimationFrame(() => {
+      const hit = pick3d(x, y), key = hit ? `${hit.L}:${hit.k}` : null;
+      R.canvas.style.cursor = hit ? 'pointer' : '';
+      if (key !== A.hover) { A.hover = key; applyHighlight(); }
+      if (hit) showTip(hit.L, hit.k, { x, y }); else hideTip();
+    });
+  });
+  R.canvas.addEventListener('pointerleave', () => { cancelAnimationFrame(hoverRaf); if (A.hover) { A.hover = null; applyHighlight(); } hideTip(); R.canvas.style.cursor = ''; });
+  R.callouts.addEventListener('click', e => { const c = e.target.closest('.as-call'); if (!c) return; const [L, k] = c.dataset.slot.split(':').map(Number); if (A.sel === k && A.layer === L) select(null); else { goTo({ L, k }); focusOn(L, k); } });
+  R.callouts.addEventListener('pointerover', e => { const c = e.target.closest('.as-call'); if (!c) return; A.hover = c.dataset.slot; applyHighlight(); });
+  R.callouts.addEventListener('pointerleave', () => { A.hover = null; applyHighlight(); });
   const turn = k => { const t = A.boards[A.layer][k]; if (!t) return; pushHistory(); t.rot = (t.rot + 1) % 4; A.sel = k; renderBoard(false); const el = R.board.querySelector(`.as-slot[data-k="${k}"] canvas`); if (el) { el.classList.add('spin'); setTimeout(() => el.classList.remove('spin'), 400); } build(); };
   // ---- hovering: the tile's neighbours light up and a tooltip says how it joins them; the module lights up in 3D
   R.board.addEventListener('pointerover', e => { const slot = e.target.closest('.as-slot'); if (!slot || slot.classList.contains('empty') || drag) return; const k = +slot.dataset.k; A.hover = `${A.layer}:${k}`; applyHighlight(); showTip(A.layer, k, slot); neighboursOf(k).forEach(j => { const el = R.board.querySelector(`.as-slot[data-k="${j}"]`); if (el && !el.classList.contains('empty')) el.classList.add('nb-hover'); }); });
