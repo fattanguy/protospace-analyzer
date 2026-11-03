@@ -46,7 +46,7 @@ const gridBase = (c, r, L) => ({ gx0: MARGIN_V + c * (SLOT_V + GAP_V), gz0: MARG
 
 const A = {
   modules: [], boards: [[], [], []], layer: 0, sel: null, pick: null, custom: 0,
-  three: null, ready: false, pairs: null, opts: { fuse: true, bridges: true, walls: false, windows: true, cores: true, labels: true },
+  three: null, ready: false, pairs: null, uid: 0, history: [], future: [], hover: null, opts: { fuse: true, bridges: true, walls: false, windows: true, cores: true, labels: true },
 };
 for (let L = 0; L < 3; L++) A.boards[L] = Array.from({ length: SITE.cols * SITE.rows }, () => null);   // { mod, rot }
 let R = {};
@@ -124,7 +124,7 @@ function shade(hex, t) { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(h
 // ------------------------------------------------------------------ the board (the plan game)
 const idx = (c, r) => c + SITE.cols * r;
 function cellOf(k) { return [k % SITE.cols, (k / SITE.cols) | 0]; }
-function place(L, k, mod, rot = 1) { A.boards[L][k] = { mod, rot }; }
+function place(L, k, mod, rot = 1) { A.boards[L][k] = { mod, rot, uid: ++A.uid }; }
 function clearLayer(L) { A.boards[L] = A.boards[L].map(() => null); }
 function moveTile(L, from, to) { const b = A.boards[L]; if (b[to]) [b[from], b[to]] = [b[to], b[from]]; else { b[to] = b[from]; b[from] = null; } }
 function adjacent(a, b) { const [ca, ra] = cellOf(a), [cb, rb] = cellOf(b); return Math.abs(ca - cb) + Math.abs(ra - rb) === 1; }
@@ -276,7 +276,7 @@ const WDIR = { S: [1, 0, 0, Math.PI / 2], N: [-1, 0, 0, -Math.PI / 2], E: [0, 0,
 function build() {
   if (!A.three) return;
   clearTimeout(A.buildTimer); if (R.stats) R.stats.classList.add('busy');
-  A.buildTimer = setTimeout(() => { const t0 = performance.now(); if (A.opts.fuse) buildFused(); else buildSeparate(); A.buildMs = Math.round(performance.now() - t0); renderCallouts(); renderBoard(); R.stats.classList.remove('busy'); }, 30);
+  A.buildTimer = setTimeout(() => { const t0 = performance.now(); if (A.opts.fuse) buildFused(); else buildSeparate(); A.buildMs = Math.round(performance.now() - t0); renderCallouts(); renderBoard(false); applyHighlight(); R.stats.classList.remove('busy'); }, 30);
 }
 /* One building: every module stamped into the grid, every seam morphed, one surface. */
 function buildFused() {
@@ -363,7 +363,8 @@ function buildFused() {
     furnish(t, k, L, P.tag, building, labels);
   }
   cores(building);
-  A.three.callouts = callouts; A.three.links = links;
+  A.three.callouts = callouts; A.three.links = links; A.three.placed = placed;
+  applyHighlight();
 }
 /* The older building: every module its own mesh in its bay, bridges and garden walls between. */
 function buildSeparate() {
@@ -403,7 +404,7 @@ function buildSeparate() {
     links.push({ L, through: false, bridged: A.opts.bridges && cn.levels.length > 0 });
   }
   cores(building);
-  A.three.callouts = callouts; A.three.links = links;
+  A.three.callouts = callouts; A.three.links = links; A.three.placed = null;
 }
 function bridge(group, a0, a1, y, across, axis) {                                 // a glazed link, 4 m wide, 3.3 m tall, from a0 to a1 along the axis
   const len = Math.abs(a1 - a0), mid = (a0 + a1) / 2, W = 4, H = 3.3;
@@ -443,23 +444,128 @@ function renderPalette() {
   R.palette.innerHTML = A.modules.map(m => `<button type="button" class="as-pal${A.pick === m.id ? ' on' : ''}" data-pick="${m.id}" title="${esc(m.name)} · ${esc(m.note)}"><canvas width="120" height="120"></canvas><span><b style="color:${USE[m.use] ? USE[m.use].c : '#888'}">${esc(m.id)}</b>${esc(m.name)}</span></button>`).join('');
   $$('.as-pal canvas', R.palette).forEach((c, i) => c.getContext('2d').drawImage(planOf(A.modules[i], 1), 0, 0));
 }
-function renderBoard() {
-  const L = A.layer, b = A.boards[L];
+// ------------------------------------------------------------------ the game: history, sliding, dragging, hovering, scoring
+function snapshot() { return A.boards.map(b => b.map(t => t ? { id: t.mod.id, rot: t.rot, uid: t.uid } : null)); }
+function restore(snap) { snap.forEach((b, L) => b.forEach((t, k) => { const m = t && A.modules.find(x => x.id === t.id); A.boards[L][k] = m ? { mod: m, rot: t.rot, uid: t.uid } : null; })); }
+function pushHistory() { A.history.push(snapshot()); if (A.history.length > 60) A.history.shift(); A.future = []; }
+function undo() { if (!A.history.length) return; A.future.push(snapshot()); restore(A.history.pop()); A.sel = null; renderBoard(); build(); }
+function redo() { if (!A.future.length) return; A.history.push(snapshot()); restore(A.future.pop()); A.sel = null; renderBoard(); build(); }
+const neighboursOf = k => { const [c, r] = cellOf(k), out = []; for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const c2 = c + dc, r2 = r + dr; if (c2 >= 0 && r2 >= 0 && c2 < SITE.cols && r2 < SITE.rows) out.push(idx(c2, r2)); } return out; };
+/* The classic move: a tile slides into the one empty bay beside it. Returns where it went, or −1. */
+function slide(L, k) {
+  const b = A.boards[L], empties = neighboursOf(k).filter(j => !b[j]); if (empties.length !== 1) return -1;
+  pushHistory(); moveTile(L, k, empties[0]); return empties[0];
+}
+function scramble(L, n = 14) {                                                      // a run of random legal slides, one every quarter second
+  if (A.scrambling) return; A.scrambling = true; pushHistory(); A.sel = null;
+  const step = i => {
+    const b = A.boards[L], movable = b.map((t, k) => t && neighboursOf(k).some(j => !b[j]) ? k : -1).filter(k => k >= 0);
+    if (i >= n || !movable.length) { A.scrambling = false; build(); return; }
+    const k = movable[Math.floor(Math.random() * movable.length)], empties = neighboursOf(k).filter(j => !b[j]);
+    moveTile(L, k, empties[Math.floor(Math.random() * empties.length)]); renderBoard(); setTimeout(() => step(i + 1), 240);
+  };
+  step(0);
+}
+/* FLIP: tiles that moved glide from where they were to where they are. */
+function rectsNow() { const m = new Map(); $$('.as-slot[data-uid]', R.board).forEach(el => m.set(el.dataset.uid, el.getBoundingClientRect())); return m; }
+function glide(before) {
+  $$('.as-slot[data-uid]', R.board).forEach(el => {
+    const was = before.get(el.dataset.uid); if (!was) { el.classList.add('pop'); return; }
+    const now = el.getBoundingClientRect(), dx = was.left - now.left, dy = was.top - now.top; if (!dx && !dy) return;
+    el.style.transition = 'none'; el.style.transform = `translate(${dx}px, ${dy}px)`; el.style.zIndex = 3; el.getBoundingClientRect();
+    el.style.transition = 'transform .34s cubic-bezier(.2, .8, .2, 1)'; el.style.transform = '';
+    el.addEventListener('transitionend', () => { el.style.transition = ''; el.style.zIndex = ''; }, { once: true });
+  });
+}
+function tileInfo(L, k) {                                                          // what a tile is and how it joins its neighbours, for the tooltip
+  const t = A.boards[L][k]; if (!t) return '';
+  const lines = [`<b>${esc(t.mod.id)} ${esc(t.mod.name)}</b> <small>· ${esc(t.mod.typology)} · turned ${t.rot * 90}°</small>`];
+  const names = { S: 'south', N: 'north', E: 'east (bay side)', W: 'west (street side)' };
+  for (const pr of pairsOf(L)) {
+    if (pr.a !== k && pr.b !== k) continue; const other = A.boards[L][pr.a === k ? pr.b : pr.a]; if (!other) continue;
+    const dir = pr.axis === 'x' ? (pr.a === k ? 'S' : 'N') : (pr.a === k ? 'E' : 'W');
+    lines.push(pr.through ? `morphs into ${esc(other.mod.id)} ${esc(other.mod.name)} to the ${names[dir]}` : pr.joined ? `bridge to ${esc(other.mod.id)} ${esc(other.mod.name)} to the ${names[dir]} at ${pr.levels.map(l => Math.round(l.y * LAT) + ' m').join(', ')}` : `beside ${esc(other.mod.id)} to the ${names[dir]} — no floor meets, open seam`);
+  }
+  const below = L > 0 && A.boards[L - 1][k], above = L < 2 && A.boards[L + 1][k];
+  if (below) lines.push(`stacked on ${esc(below.mod.id)} ${esc(below.mod.name)}`); else if (L > 0) lines.push('<i>nothing below — it floats; stack it on a module</i>');
+  if (above) lines.push(`${esc(above.mod.id)} ${esc(above.mod.name)} stacked on top`);
+  if (!lines.some((l, i) => i > 0 && !/float/.test(l))) lines.push('<i>no neighbours yet — slide it next to another module</i>');
+  return lines.join('<br>');
+}
+function showTip(L, k, slot) {                                                      // under the tile (above it near the bottom of the window), never over its neighbours' row
+  R.tip.innerHTML = tileInfo(L, k); R.tip.hidden = false;
+  const r = R.tip.getBoundingClientRect(), s = slot.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+  R.tip.style.left = `${Math.max(8, Math.min(s.left, vw - r.width - 12))}px`;
+  R.tip.style.top = `${s.bottom + 10 + r.height > vh - 8 ? s.top - r.height - 10 : s.bottom + 10}px`;
+}
+function hideTip() { R.tip.hidden = true; }
+/* The building score: five things the brief asks for, each 0–100, and goals ticked when they are met. */
+function score() {
+  const mods = []; for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (t) mods.push({ t, k, L }); });
+  if (!mods.length) return { total: 0, parts: [], goals: [] };
+  const g = connectedGroups(), lob = mods.filter(m => m.t.mod.use === 'lobby'), off = mods.filter(m => m.t.mod.use === 'office'), gat = mods.filter(m => m.t.mod.use === 'social');
+  const joined = 100 * (1 - (g.groups - 1) / Math.max(1, mods.length - 1));
+  const street = lob.length ? 100 * lob.filter(m => m.L === 0 && cellOf(m.k)[1] === 0).length / lob.length : 100;
+  const flood = off.length ? 100 * off.filter(m => m.L > 0).length / off.length : 100;
+  const touching = m => { let n = 0; for (const j of neighboursOf(m.k)) if (A.boards[m.L][j]) n++; if (m.L > 0 && A.boards[m.L - 1][m.k]) n++; if (m.L < 2 && A.boards[m.L + 1][m.k]) n++; return n; };
+  const shared = gat.length ? 100 * gat.filter(m => touching(m) >= 2).length / gat.length : 100;
+  const floating = mods.filter(m => m.L > 0 && !A.boards[m.L - 1][m.k]).length, grounded = 100 * (1 - floating / mods.length);
+  let seams = 0, faces = 0; for (const m of mods) { seams += touching(m); faces += m.L > 0 ? 5 : 4; }
+  const compact = Math.min(100, 100 * seams / Math.max(1, faces) * 2.2);
+  const parts = [['Joined', joined, 'one building, not separate pieces'], ['Street edge', street, 'lobbies in the west row, at ground'], ['Above the flood', flood, 'offices a level up'], ['Shared rooms', shared, 'each gathering room touching two or more modules'], ['Grounded', grounded, 'nothing floating'], ['Compact', compact, 'modules touching, not scattered']];
+  const total = Math.round(parts.reduce((s, p) => s + p[1], 0) / parts.length);
+  const goals = [['One connected building', g.groups === 1], ['Every lobby lines the street', lob.length > 0 && street === 100], ['No office on the flooding ground', off.length > 0 && flood === 100], ['Every gathering room is shared', gat.length > 0 && shared === 100], ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15], ['Nothing floats', floating === 0]];
+  return { total, parts, goals, floating };
+}
+function renderScore() {
+  const sc = score();
+  if (!sc.parts.length) { R.score.innerHTML = '<p class="hint">Place modules to start scoring the building.</p>'; return; }
+  const done = sc.goals.filter(g => g[1]).length;
+  R.score.innerHTML = `<div class="as-total"><b>${sc.total}</b><span>building<br>score</span></div>
+    <div class="as-bars">${sc.parts.map(([n, v, h]) => `<div class="as-bar" title="${esc(h)}"><span>${n}</span><i><b style="width:${v.toFixed(0)}%"></b></i><em>${v.toFixed(0)}</em></div>`).join('')}</div>
+    <div class="as-goals"><div class="eyebrow">Goals · ${done} of ${sc.goals.length}</div>${sc.goals.map(([n, ok]) => `<div class="${ok ? 'ok' : ''}"><i>${ok ? '✓' : '○'}</i>${n}</div>`).join('')}</div>`;
+}
+/* The selected (or hovered) module lit in the 3D view: its part of the fused body brightens, the rest dims a little. */
+function applyHighlight() {
+  const T = A.three; if (!T || !T.building) return;
+  const mesh = T.building.children.find(o => o.name === 'Valve HQ · fused'); if (!mesh) return;
+  const g = mesh.geometry, labels = g.userData.labels, base = g.userData.baseColor, col = g.getAttribute('color'); if (!labels) return;
+  const want = A.hover || (A.sel != null ? `${A.layer}:${A.sel}` : null), P = want && (T.placed || []).find(p => `${p.L}:${p.k}` === want), pid = P ? P.pid : 0;
+  const arr = col.array;
+  for (let v = 0, n = labels.length; v < n; v++) {
+    const hit = labels[v] === pid, f = pid ? (hit ? 1.0 : 0.72) : 1.0, lift = pid && hit ? 0.35 : 0;
+    for (let c = 0; c < 3; c++) { const b = base[v * 3 + c]; arr[v * 3 + c] = b * f + lift * (1 - b); }
+  }
+  col.needsUpdate = true;
+}
+function focusOn(L, k) {                                                            // the camera target glides to the module
+  const T = A.three; if (!T) return; const [c, r] = cellOf(k), ctr = slotCentre(c, r), to = new THREE.Vector3(ctr.x, PODIUM + L * PITCH + MOD_H * 0.45, ctr.z);
+  const from = T.controls.target.clone(), cam0 = T.camera.position.clone(), d = to.clone().sub(from), t0 = performance.now();
+  cancelAnimationFrame(T.focusRaf);
+  const tick = now => { const u = Math.min(1, (now - t0) / 480), e = 1 - Math.pow(1 - u, 3); T.controls.target.copy(from).addScaledVector(d, e); T.camera.position.copy(cam0).addScaledVector(d, e); if (u < 1) T.focusRaf = requestAnimationFrame(tick); };
+  T.focusRaf = requestAnimationFrame(tick);
+}
+
+function renderBoard(animate = true) {
+  const L = A.layer, b = A.boards[L], below = L > 0 ? A.boards[L - 1] : null;
+  const before = animate && R.board.children.length ? rectsNow() : null;
   $$('[data-layer]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.layer === L));
-  const prs = pairsOf(L);
-  R.board.innerHTML = b.map((t, k) => { const [c, r] = cellOf(k); return `<div class="as-slot${t ? '' : ' empty'}${A.sel === k ? ' sel' : ''}" data-k="${k}" style="grid-column:${c + 1};grid-row:${r + 1}" title="${t ? esc(t.mod.name) : 'empty bay'}">${t ? `<canvas width="120" height="120"></canvas><em>${esc(t.mod.id)}</em>` : ''}</div>`; }).join('')
+  const prs = pairsOf(L), nb = A.sel != null ? neighboursOf(A.sel) : [];
+  R.board.innerHTML = b.map((t, k) => {
+    const [c, r] = cellOf(k), under = below && below[k], floats = t && L > 0 && !under, slideable = t && neighboursOf(k).filter(j => !b[j]).length === 1;
+    const cls = ['as-slot', t ? '' : 'empty', A.sel === k ? 'sel' : '', nb.includes(k) ? 'nb' : '', floats ? 'float' : '', slideable ? 'can-slide' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-k="${k}"${t ? ` data-uid="${t.uid}"` : ''} style="grid-column:${c + 1};grid-row:${r + 1}">${t ? `<canvas width="120" height="120"></canvas><em>${esc(t.mod.id)}</em>${floats ? '<s title="nothing below: it floats">⚠</s>' : ''}` : under ? `<canvas class="below" width="120" height="120"></canvas><em class="below-tag">below · ${esc(under.mod.id)}</em>` : ''}</div>`;
+  }).join('')
     + prs.map(x => { const [c, r] = cellOf(x.a); const cls = x.through ? ' fused' : x.joined ? '' : ' wall'; const title = x.through ? 'the two modules morph into each other across the seam' : x.joined ? `bridge at ${x.levels.map(l => Math.round(l.y * LAT) + ' m').join(', ')}` : 'no shared floor: the seam stays open'; return `<i class="as-link ${x.axis}${cls}" style="--c:${c};--r:${r}" title="${title}"></i>`; }).join('');
-  $$('.as-slot canvas', R.board).forEach(cv => { const k = +cv.parentElement.dataset.k, t = b[k]; cv.getContext('2d').drawImage(planOf(t.mod, t.rot), 0, 0); });
-  renderStats(); save();
+  $$('.as-slot canvas', R.board).forEach(cv => { const k = +cv.parentElement.dataset.k, t = cv.classList.contains('below') ? below[k] : b[k]; cv.getContext('2d').drawImage(planOf(t.mod, t.rot), 0, 0); });
+  if (before) glide(before);
+  renderStats(); renderScore(); save();
 }
 function renderStats() {
-  const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, som: 0 }; let area = 0, groundOffice = 0, westLobby = 0;
-  for (let l = 0; l < 3; l++) A.boards[l].forEach((t, k) => { if (!t) return; uses[t.mod.use]++; area += t.mod.an.floors.length * LAT * LAT; if (l === 0 && t.mod.use === 'office') groundOffice++; if (l === 0 && cellOf(k)[1] === 0 && t.mod.use === 'lobby') westLobby++; });
-  const notes = [];
-  notes.push(g.modules ? (g.groups === 1 ? 'Every module is reachable — the seams, bridges and cores join them all.' : `${g.groups} separate groups: put a neighbour beside one of them, or stack a module, to join them.`) : 'Place modules: pick one in the palette, click an empty bay.');
-  if (groundOffice) notes.push(`${groundOffice} office module${groundOffice > 1 ? 's' : ''} on the ground layer: the ground floods — cabals belong a level up.`);
-  if (uses.lobby && westLobby < Math.min(uses.lobby, 3)) notes.push('Lobbies make the public edge: put them in the west row, along the street.');
-  R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of floor · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.som ? ` · ${uses.som} from the map` : ''}<br><span class="hint">${notes.join(' ')}</span>`;
+  const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, som: 0 }; let area = 0;
+  for (let l = 0; l < 3; l++) A.boards[l].forEach(t => { if (!t) return; uses[t.mod.use]++; area += t.mod.an.floors.length * LAT * LAT; });
+  const hint = g.modules ? (g.groups === 1 ? 'Every module is reachable — the seams, bridges and cores join them all.' : `${g.groups} separate groups: slide a module beside another, or stack one, to join them.`) : 'Drag a module from the palette onto a bay, or click one then click a bay.';
+  R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of floor · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.som ? ` · ${uses.som} from the map` : ''}<br><span class="hint">${hint}</span>`;
 }
 function renderCallouts() {
   const cs = A.three && A.three.callouts || [];
@@ -483,18 +589,18 @@ function planPicture() {                                                        
   return c;
 }
 function save() { try { localStorage.setItem('protospace.assemble', JSON.stringify({ v: 1, layer: A.layer, boards: A.boards.map(b => b.map(t => t ? { id: t.mod.id, rot: t.rot } : null)) })); } catch (e) {} }
-function load() { try { const j = JSON.parse(localStorage.getItem('protospace.assemble') || 'null'); if (!j || j.v !== 1) return false; A.layer = j.layer || 0; j.boards.forEach((b, L) => b.forEach((t, k) => { const m = t && A.modules.find(x => x.id === t.id); A.boards[L][k] = m ? { mod: m, rot: t.rot } : null; })); return A.boards.some(b => b.some(Boolean)); } catch (e) { return false; } }
+function load() { try { const j = JSON.parse(localStorage.getItem('protospace.assemble') || 'null'); if (!j || j.v !== 1) return false; A.layer = j.layer || 0; j.boards.forEach((b, L) => b.forEach((t, k) => { const m = t && A.modules.find(x => x.id === t.id); A.boards[L][k] = m ? { mod: m, rot: t.rot, uid: ++A.uid } : null; })); return A.boards.some(b => b.some(Boolean)); } catch (e) { return false; } }
 
 const HTML = `
 <div class="as">
   <aside class="xp-controls as-controls" aria-label="Assemble controls">
     <h2 class="eyebrow">The modules</h2>
-    <p class="hint">Click a module, then an empty bay on the board. Fifteen from the catalogue; tiles sent from the Explorer (“Build with it”) appear here too.</p>
+    <p class="hint">Drag a module onto a bay (or click it, then a bay). Fifteen from the catalogue; tiles sent from the Explorer (“Build with it”) appear here too.</p>
     <div class="as-palette" data-v="palette"></div>
     <h2 class="eyebrow" style="margin-top:16px">The board</h2>
-    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn quiet" data-v="shuffle">Shuffle layer</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
-    <div class="xp-row"><button type="button" class="btn quiet" data-v="rotate">Turn selected 90°</button><button type="button" class="btn quiet" data-v="remove">Remove selected</button></div>
-    <p class="hint">Slide: select a tile, then click an empty bay (the arrow keys slide it into a neighbouring empty bay). Bays are 31 m with a 3 m seam between; three layers: ground on pilotis, two above.</p>
+    <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn quiet" data-v="shuffle">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
+    <div class="xp-row"><button type="button" class="btn quiet" data-v="undo" title="Ctrl/⌘ Z">Undo</button><button type="button" class="btn quiet" data-v="redo" title="Ctrl/⌘ Shift Z">Redo</button><button type="button" class="btn quiet" data-v="rotate" title="R, or double-click a tile">Turn 90°</button><button type="button" class="btn quiet" data-v="remove" title="Delete, or drag a tile off the board">Remove</button></div>
+    <p class="hint">It is a sliding puzzle: click a tile with one empty bay beside it and it slides there; drag any tile to any bay (onto another tile to swap); drag it off the board to take it out; arrow keys slide the selected tile, R turns it, 1 2 3 change layer. Three layers: ground on pilotis, two above — a tile on an upper layer needs a module below it.</p>
     <h2 class="eyebrow" style="margin-top:16px">The building</h2>
     <label class="chk"><input type="checkbox" data-opt="fuse" checked> Fuse the modules — they morph into each other across the seams</label>
     <label class="chk"><input type="checkbox" data-opt="bridges" checked> Bridges where floors meet but no mass does</label>
@@ -511,44 +617,86 @@ const HTML = `
       <div class="as-boardrow"><div class="as-edge left">N · Venetian Causeway</div><div class="as-board" data-v="board" style="--cols:${SITE.cols};--rows:${SITE.rows}" tabindex="0" aria-label="Plan board"></div><div class="as-edge right">S · MacArthur Causeway</div></div>
       <div class="as-edge bottom"><span>Biscayne Bay · surge from the east · the ground floods, so the ground layer stands 3 m up on pilotis</span></div>
     </div>
-    <p class="status" data-v="stats"></p>
+    <div class="as-under"><p class="status" data-v="stats"></p><div class="as-score" data-v="score"></div></div>
     <div class="as-viewer"><canvas data-v="canvas" aria-label="The building in 3D"></canvas><div class="as-compass">drag to orbit · scroll to zoom · <button type="button" data-view="street">street</button> <button type="button" data-view="bay">bay</button> <button type="button" data-view="aerial">aerial</button> <button type="button" data-view="plan">plan</button></div></div>
     <h2 class="eyebrow" style="margin-top:18px">Callouts · what each module is and where it came from</h2>
     <div class="as-callouts" data-v="callouts"></div>
   </div>
+  <div class="as-tip" data-v="tip" hidden></div>
 </div>`;
 
 export function mount(root) {
   root.innerHTML = HTML; R = { root }; $$('[data-v]', root).forEach(el => { R[el.dataset.v] = el; });
   initThree(R.canvas);
-  R.palette.addEventListener('click', e => { const b = e.target.closest('[data-pick]'); if (!b) return; A.pick = A.pick === b.dataset.pick ? null : b.dataset.pick; A.sel = null; renderPalette(); renderBoard(); });
-  R.board.addEventListener('click', e => {
-    const slot = e.target.closest('.as-slot'); if (!slot) return; const k = +slot.dataset.k, b = A.boards[A.layer];
-    if (A.pick && !b[k]) { const m = A.modules.find(x => x.id === A.pick); if (m) place(A.layer, k, m, 1); A.pick = null; renderPalette(); A.sel = k; renderBoard(); build(); return; }
-    if (A.sel == null) { if (b[k]) A.sel = k; }
-    else if (k === A.sel) A.sel = null;
-    else if (!b[k]) { moveTile(A.layer, A.sel, k); A.sel = k; build(); }
-    else A.sel = k;
-    renderBoard();
-  });
+  const slotAt = (x, y) => { const el = document.elementFromPoint(x, y); return el && el.closest ? el.closest('.as-slot') : null; };
+  const select = k => { A.sel = k; A.hover = null; renderBoard(false); applyHighlight(); if (k != null) focusOn(A.layer, k); };
+  // ---- dragging: from the palette onto a bay, from bay to bay (onto a tile swaps), off the board to remove; a short press is a click
+  let drag = null;
+  const startDrag = (e, d) => { if (e.button !== 0) return; drag = { ...d, x0: e.clientX, y0: e.clientY, moved: false, ghost: null }; window.addEventListener('pointermove', onDragMove); window.addEventListener('pointerup', onDragEnd, { once: true }); window.addEventListener('pointercancel', onDragEnd, { once: true }); };
+  const onDragMove = e => {
+    if (!drag) return; const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
+    if (!drag.moved) { if (Math.hypot(dx, dy) < 6) return; drag.moved = true; hideTip(); const g = document.createElement('div'); g.className = 'as-ghost'; const cv = document.createElement('canvas'); cv.width = cv.height = 120; cv.getContext('2d').drawImage(drag.canvas, 0, 0); g.appendChild(cv); document.body.appendChild(g); drag.ghost = g; document.body.classList.add('as-dragging'); if (drag.src === 'board') { const el = R.board.querySelector(`.as-slot[data-k="${drag.k}"]`); if (el) el.classList.add('lifted'); } }
+    drag.ghost.style.transform = `translate(${e.clientX - 46}px, ${e.clientY - 46}px)`;
+    const over = slotAt(e.clientX, e.clientY); $$('.as-slot.over', R.board).forEach(x => x.classList.remove('over')); if (over) over.classList.add('over');
+    R.board.classList.toggle('drop-out', drag.src === 'board' && !over && !R.board.contains(document.elementFromPoint(e.clientX, e.clientY)));
+    e.preventDefault();
+  };
+  const onDragEnd = e => {
+    window.removeEventListener('pointermove', onDragMove); const d = drag; drag = null; if (!d) return;
+    if (!d.moved) { onTap(d); return; }
+    d.ghost.remove(); document.body.classList.remove('as-dragging'); R.board.classList.remove('drop-out'); $$('.as-slot.over, .as-slot.lifted', R.board).forEach(x => x.classList.remove('over', 'lifted'));
+    const over = slotAt(e.clientX, e.clientY), k = over ? +over.dataset.k : -1, L = A.layer, b = A.boards[L];
+    if (d.src === 'palette') { if (k < 0) return; const m = A.modules.find(x => x.id === d.id); if (!m) return; pushHistory(); place(L, k, m, 1); A.pick = null; renderPalette(); A.sel = k; renderBoard(); build(); focusOn(L, k); return; }
+    if (k >= 0 && k !== d.k) { pushHistory(); moveTile(L, d.k, k); A.sel = k; renderBoard(); build(); focusOn(L, k); return; }
+    if (k < 0 && !R.board.contains(document.elementFromPoint(e.clientX, e.clientY))) { pushHistory(); b[d.k] = null; A.sel = null; renderBoard(); build(); return; }
+    renderBoard(false);
+  };
+  const onTap = d => {
+    const L = A.layer, b = A.boards[L];
+    if (d.src === 'palette') { A.pick = A.pick === d.id ? null : d.id; A.sel = null; renderPalette(); renderBoard(false); return; }
+    const k = d.k;
+    if (A.pick && !b[k]) { const m = A.modules.find(x => x.id === A.pick); if (m) { pushHistory(); place(L, k, m, 1); } A.pick = null; renderPalette(); A.sel = k; renderBoard(); build(); focusOn(L, k); return; }
+    if (b[k]) {
+      const to = slide(L, k);                                                        // the puzzle move: one empty bay beside it → it slides there (and stays selected, so a second click slides it back)
+      if (to >= 0) { A.sel = to; A.hover = null; renderBoard(); build(); flash(to); return; }
+      select(k === A.sel ? null : k); return;                                        // otherwise a click selects it, a click on the selected one lets go
+    }
+    if (A.sel != null) { pushHistory(); moveTile(L, A.sel, k); A.sel = k; renderBoard(); build(); focusOn(L, k); } // selected tile + empty bay: it jumps there
+  };
+  const flash = k => { const el = R.board.querySelector(`.as-slot[data-k="${k}"]`); if (el) { el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 500); } };
+  R.palette.addEventListener('pointerdown', e => { const bt = e.target.closest('[data-pick]'); if (!bt) return; startDrag(e, { src: 'palette', id: bt.dataset.pick, canvas: bt.querySelector('canvas') }); });
+  R.board.addEventListener('pointerdown', e => { const slot = e.target.closest('.as-slot'); if (!slot) return; R.board.focus({ preventScroll: true }); const k = +slot.dataset.k; if (slot.classList.contains('empty')) { startDrag(e, { src: 'empty', k, canvas: null }); return; } startDrag(e, { src: 'board', k, canvas: slot.querySelector('canvas') }); });
+  R.board.addEventListener('dblclick', e => { const slot = e.target.closest('.as-slot'); if (!slot || slot.classList.contains('empty')) return; turn(+slot.dataset.k); });
+  const turn = k => { const t = A.boards[A.layer][k]; if (!t) return; pushHistory(); t.rot = (t.rot + 1) % 4; A.sel = k; renderBoard(false); const el = R.board.querySelector(`.as-slot[data-k="${k}"] canvas`); if (el) { el.classList.add('spin'); setTimeout(() => el.classList.remove('spin'), 400); } build(); };
+  // ---- hovering: the tile's neighbours light up and a tooltip says how it joins them; the module lights up in 3D
+  R.board.addEventListener('pointerover', e => { const slot = e.target.closest('.as-slot'); if (!slot || slot.classList.contains('empty') || drag) return; const k = +slot.dataset.k; A.hover = `${A.layer}:${k}`; applyHighlight(); showTip(A.layer, k, slot); neighboursOf(k).forEach(j => { const el = R.board.querySelector(`.as-slot[data-k="${j}"]`); if (el && !el.classList.contains('empty')) el.classList.add('nb-hover'); }); });
+  R.board.addEventListener('pointerout', e => { const slot = e.target.closest('.as-slot'); if (!slot) return; A.hover = null; applyHighlight(); hideTip(); $$('.as-slot.nb-hover', R.board).forEach(x => x.classList.remove('nb-hover')); });
+  // ---- keys
   R.board.addEventListener('keydown', e => {
-    if (A.sel == null) return; const [c, r] = cellOf(A.sel), d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!d) return;
+    const key = e.key, meta = e.metaKey || e.ctrlKey;
+    if (meta && key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (key === '1' || key === '2' || key === '3') { A.layer = +key - 1; A.sel = null; renderBoard(false); applyHighlight(); return; }
+    if (key.toLowerCase() === 'r' && A.sel != null) { turn(A.sel); return; }
+    if ((key === 'Delete' || key === 'Backspace') && A.sel != null) { pushHistory(); A.boards[A.layer][A.sel] = null; A.sel = null; renderBoard(); build(); e.preventDefault(); return; }
+    if (key === 'Escape') { select(null); return; }
+    if (A.sel == null) return; const [c, r] = cellOf(A.sel), d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[key]; if (!d) return;
     const c2 = c + d[0], r2 = r + d[1]; if (c2 < 0 || r2 < 0 || c2 >= SITE.cols || r2 >= SITE.rows) return; const k2 = idx(c2, r2);
-    if (!A.boards[A.layer][k2]) { moveTile(A.layer, A.sel, k2); A.sel = k2; renderBoard(); build(); } e.preventDefault();
+    if (!A.boards[A.layer][k2]) { pushHistory(); moveTile(A.layer, A.sel, k2); A.sel = k2; renderBoard(); build(); focusOn(A.layer, k2); } e.preventDefault();
   });
-  $$('[data-layer]', root).forEach(b => b.addEventListener('click', () => { A.layer = +b.dataset.layer; A.sel = null; renderBoard(); }));
-  $$('[data-view]', root).forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
-  R.auto.addEventListener('click', () => autoArrange());
-  R.shuffle.addEventListener('click', () => shuffleLayer(A.layer));
-  R.clear.addEventListener('click', () => { clearLayer(A.layer); A.sel = null; renderBoard(); build(); });
-  R.rotate.addEventListener('click', () => { const t = A.sel != null && A.boards[A.layer][A.sel]; if (t) { t.rot = (t.rot + 1) % 4; renderBoard(); build(); } });
-  R.remove.addEventListener('click', () => { if (A.sel != null) { A.boards[A.layer][A.sel] = null; A.sel = null; renderBoard(); build(); } });
+  $$('[data-layer]', root).forEach(bt => bt.addEventListener('click', () => { A.layer = +bt.dataset.layer; A.sel = null; renderBoard(false); applyHighlight(); }));
+  $$('[data-view]', root).forEach(bt => bt.addEventListener('click', () => setView(bt.dataset.view)));
+  R.auto.addEventListener('click', () => { pushHistory(); autoArrange(); });
+  R.shuffle.addEventListener('click', () => scramble(A.layer));
+  R.clear.addEventListener('click', () => { pushHistory(); clearLayer(A.layer); A.sel = null; renderBoard(); build(); });
+  R.undo.addEventListener('click', undo); R.redo.addEventListener('click', redo);
+  R.rotate.addEventListener('click', () => { if (A.sel != null) turn(A.sel); });
+  R.remove.addEventListener('click', () => { if (A.sel != null) { pushHistory(); A.boards[A.layer][A.sel] = null; A.sel = null; renderBoard(); build(); } });
   $$('[data-opt]', root).forEach(x => x.addEventListener('change', () => { A.opts[x.dataset.opt] = x.checked; build(); }));
   R.png.addEventListener('click', () => { const { renderer, scene, camera } = A.three; renderer.render(scene, camera); renderer.domElement.toBlob(b => download(b, 'ProtoSpace-ValveHQ-building.png')); });
   R.plan.addEventListener('click', () => planPicture().toBlob(b => download(b, `ProtoSpace-ValveHQ-plan-${['ground', 'level2', 'level3'][A.layer]}.png`)));
   R.glb.addEventListener('click', () => new GLTFExporter().parse(A.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ.glb'), err => console.error(err), { binary: true }));
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(A.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ.obj'));
   R.stats.textContent = 'Loading the fifteen modules…';
-  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) autoArrange(7); else { renderBoard(); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
+  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) autoArrange(7); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
   return { show() { window.dispatchEvent(new Event('resize')); }, addModule };
 }

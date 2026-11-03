@@ -92,6 +92,7 @@ export function fusedGeometry(occ, lab, GX, GY, GZ, colorOf, iters = 12) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setIndex(new THREE.BufferAttribute(index, 1));
   g.computeVertexNormals();
+  g.userData.labels = Int16Array.from(vlab); g.userData.baseColor = Float32Array.from(col);   // which module every vertex belongs to, and its resting colour (for highlights)
   return g;
 }
 
