@@ -433,7 +433,8 @@
 
 /* ░░ Assemble · the office on the lot ░░ */
 .as { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 28px; align-items: start; margin-top: 16px; }
-.as-palette { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.as-palhead { display: grid; gap: 4px; margin-bottom: 8px; } .as-cat { width: 100%; font-weight: 500; letter-spacing: .02em; cursor: pointer; }
+.as-palette { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 332px; overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
 .as-pal { font: inherit; color: var(--ink2); background: var(--bg); border: 1.5px solid var(--rule); padding: 4px; cursor: grab; display: grid; gap: 2px; text-align: left; touch-action: none; user-select: none; -webkit-user-select: none; }
 .as-pal canvas { width: 100%; height: auto; display: block; background: #0a0a0a; }
 .as-pal span { font-size: 10px; line-height: 1.25; letter-spacing: .02em; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -34,7 +34,8 @@ SITE.boardX = SITE.cols * SITE.slotX + (SITE.cols - 1) * SITE.gapX; SITE.boardZ 
 SITE.x0 = (SITE.length - SITE.boardX) / 2; SITE.z0 = (SITE.width - SITE.boardZ) / 2;                                   // the board sits centred on the lot
 const PODIUM = PODIUM_V * LAT, PITCH = PITCH_V * LAT, MOD_H = 19;                                                          // pilotis height · layer pitch · module height (m)
 const LAYERS = ['Ground · on pilotis', 'Level 2', 'Level 3'];
-const USE = { lobby: { name: 'Lobby', c: '#6d8f98' }, office: { name: 'Office', c: '#c0994f' }, social: { name: 'Gathering', c: '#b4584a' }, som: { name: 'Explorer tile', c: '#7b7aa3' } };
+const USE = { lobby: { name: 'Lobby', c: '#6d8f98' }, office: { name: 'Office', c: '#c0994f' }, social: { name: 'Gathering', c: '#b4584a' }, hybrid: { name: 'Hybrid', c: '#8e6f9b' }, som: { name: 'Explorer tile', c: '#7b7aa3' } };
+const CATS = [['lobby', 'Lobbies'], ['office', 'Workspaces'], ['social', 'Gathering'], ['hybrid', 'Hybrid spaces'], ['som', 'From the Explorer']];   // the palette's drop-down
 const slotOrigin = (c, r) => ({ x: SITE.x0 + c * (SITE.slotX + SITE.gapX), z: -(SITE.z0 + r * (SITE.slotZ + SITE.gapZ)) });   // the slot's north-west corner
 const slotCentre = (c, r) => { const o = slotOrigin(c, r); return { x: o.x + SITE.slotX / 2, z: o.z - SITE.slotZ / 2 }; };
 /* A module's lattice footprint turned on the board: (x, z) of the 32 × 32 lattice → (u, v), u along the lot (south = +u), v across it (east = +v). */
@@ -45,7 +46,7 @@ const gridX = gx => SITE.x0 + (gx - MARGIN_V + 0.5) * LAT, gridY = gy => (gy + 0
 const gridBase = (c, r, L) => ({ gx0: MARGIN_V + c * (SLOT_V + GAP_V), gz0: MARGIN_V + r * (SLOT_V + GAP_V), gy0: PODIUM_V + L * PITCH_V - 1 });   // lattice (u, v, y) → (gx0 + u − 1, gy0 + y, gz0 + v − 1)
 
 const A = {
-  modules: [], boards: [[], [], []], layer: 0, sel: null, pick: null, custom: 0,
+  modules: [], boards: [[], [], []], layer: 0, sel: null, pick: null, custom: 0, cat: 'lobby',
   three: null, ready: false, pairs: null, uid: 0, history: [], future: [], hover: null, opts: { fuse: true, walls: false, cores: true, labels: true },
 };
 for (let L = 0; L < 3; L++) A.boards[L] = Array.from({ length: SITE.cols * SITE.rows }, () => null);   // { mod, rot }
@@ -78,14 +79,25 @@ async function loadBuiltins() {
     const m = { id: it.id, name: it.name, use: it.cat, typology: it.typology, note: `${it.anim} · frame ${it.frame} · bay ${it.bay} · ${USE[it.cat].name} ${it.score}/100 · ${it.rating}`, source: 'catalogue', geo, occ: vx.occ, fit: vx.fit, an: analyse(vx.occ, N), plans: {} };
     A.modules.push(m);
   }
+  // the picks of the combination maps (assets/spaces/picks.json, made by the boards' bake script): the best
+  // in-betweens of Lobby × Workspace, Lobby × Gathering, Gathering × Workspace and the hybrid map, sorted by use
+  try {
+    const picks = await (await fetch('assets/spaces/picks.json')).json();
+    for (const it of picks) A.modules.push(moduleFromOcc({ id: it.id, name: it.name, use: it.use, typology: it.typology, note: it.note, source: 'map', occ: unpack(it.occ, it.N || N), N: it.N || N }));
+  } catch (e) { console.warn('no map picks', e); }
 }
-/* A tile from the Explorer (voxels in its lattice) as a module: an organic surface in metres, like the catalogue ones. */
+const unpack = (b64, n) => { const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)), occ = new Uint8Array(n * n * n); for (let i = 0; i < occ.length; i++) occ[i] = (bytes[i >> 3] >> (i & 7)) & 1; return occ; };
+/* A module from voxels in the lattice: an organic surface in metres, like the catalogue ones. */
+function moduleFromOcc({ id, name, use, typology, note, source, occ, N: n = N }) {
+  const m = { id, name, use, typology, note, source, occ, fit: null, shift: null, an: analyse(occ, n), plans: {} };
+  let g = null;                                                                  // the surface is only needed for the unfused building and the exports: made on first use
+  Object.defineProperty(m, 'geo', { enumerable: true, get() { if (!g) { g = organicGeometry(occ, n); g.scale(LAT, LAT, LAT); g.computeBoundingBox(); const b = g.boundingBox; m.shift = [-b.min.x, -b.min.y, -b.max.z]; g.translate(...m.shift); g.computeBoundingBox(); } return g; } });
+  return m;
+}
+/* A tile sent from the Explorer. */
 export function addModule({ name, occ, N: n = N, note = '', use = 'som' }) {
-  const g = organicGeometry(occ, n); g.scale(LAT, LAT, LAT); g.computeBoundingBox();
-  const b = g.boundingBox, shift = [-b.min.x, -b.min.y, -b.max.z]; g.translate(...shift); g.computeBoundingBox();
-  const id = `X${++A.custom}`;
-  const m = { id, name: name || `Explorer tile ${A.custom}`, use, typology: 'from the map', note, source: 'explorer', geo: g, occ, fit: null, shift, an: analyse(occ, n), plans: {} };
-  A.modules.push(m); renderPalette(); return m;
+  const m = moduleFromOcc({ id: `X${++A.custom}`, name: name || `Explorer tile ${A.custom}`, use, typology: 'from the map', note, source: 'explorer', occ, N: n });
+  A.modules.push(m); A.cat = use; renderPalette(); return m;
 }
 /* The module's plan picture (its roof plan, with the ground-floor rooms marked), for a rotation, as a canvas. */
 function planOf(m, rot) {
@@ -125,7 +137,7 @@ function adjacent(a, b) { const [ca, ra] = cellOf(a), [cb, rb] = cellOf(b); retu
 function autoArrange(seed = Date.now() % 1000) {
   let sd = (seed * 9301 + 49297) % 233280; const rnd = () => (sd = (sd * 9301 + 49297) % 233280) / 233280;
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-  const by = u => A.modules.filter(m => m.use === u), rot = () => (rnd() < 0.75 ? 1 : 3);
+  const by = u => A.modules.filter(m => m.use === u && (m.source === 'catalogue' || u === 'som')), rot = () => (rnd() < 0.75 ? 1 : 3);
   for (let i = 0; i < 3; i++) clearLayer(i);
   // the programme: every module once, two offices and a gathering room twice (the cabal floors), dealt out lobby · office · gathering in turn
   const pools = { lobby: shuffle(by('lobby')), office: shuffle(by('office').concat(by('som'))), social: shuffle(by('social')) };
@@ -159,7 +171,7 @@ function autoArrange(seed = Date.now() % 1000) {
    the lot — the lobbies along the street row, the gathering rooms in the middle, the offices on the bay side — with the
    end bays empty, so there is room to slide. */
 function fillFloor(L = 0) {
-  const by = u => A.modules.filter(m => m.use === u), rows = [by('lobby'), by('social'), by('office')];
+  const by = u => A.modules.filter(m => m.use === u && m.source === 'catalogue'), rows = [by('lobby'), by('social'), by('office')];
   for (let i = 0; i < 3; i++) clearLayer(i); A.layer = L;
   rows.forEach((ms, r) => { const c0 = Math.max(0, Math.floor((SITE.cols - ms.length) / 2)); ms.forEach((m, i) => { if (c0 + i < SITE.cols) place(L, idx(c0 + i, r), m, 1); }); });
   A.sel = null; renderBoard(); build();
@@ -244,10 +256,6 @@ function placement(k, L, rot, geo) {
   const m = new THREE.Matrix4().makeRotationY(rot * Math.PI / 2);
   const bb = geo.boundingBox.clone().applyMatrix4(m), cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
   return new THREE.Matrix4().makeTranslation(ctr.x - cx, y - bb.min.y, ctr.z - cz).multiply(m);
-}
-function latticeToLocal(m, x, y, z) {                                             // a lattice voxel centre → the module's local metres
-  if (m.fit) { const { min, scale, off } = m.fit; return [(x + 0.5 - off[0]) / scale + min[0], (y + 0.5 - off[1]) / scale + min[1], (N - z - 0.5 - off[2]) / scale + min[2]]; }
-  return [(x + 0.5) * LAT + m.shift[0], (y + 0.5) * LAT + m.shift[1], -(z + 0.5) * LAT + m.shift[2]];
 }
 const FUSED = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
 const CORE_PID = 30000;                                                             // grid labels from here up are cores (the first the red stair), not modules
@@ -431,8 +439,14 @@ function setView(name) {
 
 // ------------------------------------------------------------------ the page
 function renderPalette() {
-  R.palette.innerHTML = A.modules.map(m => `<button type="button" class="as-pal${A.pick === m.id ? ' on' : ''}" data-pick="${m.id}" title="${esc(m.name)} · ${esc(m.note)}"><canvas width="120" height="120"></canvas><span><b style="color:${USE[m.use] ? USE[m.use].c : '#888'}">${esc(m.id)}</b>${esc(m.name)}</span></button>`).join('');
-  $$('.as-pal canvas', R.palette).forEach((c, i) => c.getContext('2d').drawImage(planOf(A.modules[i], 1), 0, 0));
+  const counts = Object.fromEntries(CATS.map(([u]) => [u, A.modules.filter(m => m.use === u).length]));
+  if (!counts[A.cat]) A.cat = CATS.find(([u]) => counts[u])?.[0] || 'lobby';
+  R.cat.innerHTML = CATS.filter(([u]) => counts[u] || u !== 'som').map(([u, nm]) => `<option value="${u}"${u === A.cat ? ' selected' : ''}>${nm} · ${counts[u]}</option>`).join('');
+  const ms = A.modules.filter(m => m.use === A.cat);
+  R.palette.innerHTML = ms.map(m => `<button type="button" class="as-pal${A.pick === m.id ? ' on' : ''}${m.source === 'map' ? ' map' : ''}" data-pick="${m.id}" title="${esc(m.name)} · ${esc(m.note)}"><canvas width="120" height="120"></canvas><span><b style="color:${USE[m.use] ? USE[m.use].c : '#888'}">${esc(m.id)}</b>${esc(m.name)}</span></button>`).join('');
+  $$('.as-pal canvas', R.palette).forEach((c, i) => c.getContext('2d').drawImage(planOf(ms[i], 1), 0, 0));
+  const nCat = ms.filter(m => m.source === 'catalogue').length, nMap = ms.filter(m => m.source === 'map').length;
+  R.catNote.textContent = A.cat === 'som' ? 'Tiles sent over from the Explorer with “Build with it”.' : A.cat === 'hybrid' ? `${nMap} from the maps — blends of two or three kinds of space.` : `${nCat} from the catalogue, then ${nMap} from the combination maps. Scroll for more.`;
 }
 // ------------------------------------------------------------------ the game: history, sliding, dragging, hovering, scoring
 function snapshot() { return A.boards.map(b => b.map(t => t ? { id: t.mod.id, rot: t.rot, uid: t.uid } : null)); }
@@ -576,10 +590,10 @@ function renderBoard(animate = true) {
   renderStats(); renderScore(); save();
 }
 function renderStats() {
-  const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, som: 0 }; let area = 0;
+  const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, hybrid: 0, som: 0 }; let area = 0;
   for (let l = 0; l < 3; l++) A.boards[l].forEach(t => { if (!t) return; uses[t.mod.use]++; area += t.mod.an.floors.length * LAT * LAT; });
   const hint = g.modules ? (g.groups === 1 ? 'Every module is reachable — the seams and cores join them all.' : `${g.groups} separate groups: slide a module beside another, or stack one, to join them.`) : 'Drag a module from the palette onto a bay, or click one then click a bay.';
-  R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of floor · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.som ? ` · ${uses.som} from the map` : ''}<br><span class="hint">${hint}</span>`;
+  R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of floor · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.hybrid ? ` · ${uses.hybrid} hybrid` : ''}${uses.som ? ` · ${uses.som} from the Explorer` : ''}<br><span class="hint">${hint}</span>`;
 }
 function renderCallouts() {
   const cs = A.three && A.three.callouts || [];
@@ -609,7 +623,8 @@ const HTML = `
 <div class="as">
   <aside class="xp-controls as-controls" aria-label="Assemble controls">
     <h2 class="eyebrow">The modules</h2>
-    <p class="hint">Drag a module onto a bay (or click it, then a bay). Fifteen from the catalogue; tiles sent from the Explorer (“Build with it”) appear here too.</p>
+    <p class="hint">Drag a module onto a bay (or click it, then a bay). Pick a kind of space in the drop-down: the fifteen of the catalogue, the best in-betweens of the combination maps, and the hybrids.</p>
+    <div class="as-palhead"><select data-v="cat" class="as-cat" aria-label="Kind of space"></select><span class="hint" data-v="catNote"></span></div>
     <div class="as-palette" data-v="palette"></div>
     <h2 class="eyebrow" style="margin-top:16px">The board</h2>
     <div class="xp-row"><button type="button" class="btn" data-v="auto">Auto-arrange</button><button type="button" class="btn" data-v="fill" title="One floor with all fifteen modules: lobbies on the street row, gathering rooms in the middle, offices on the bay side, six empty bays to slide into">All 15 on one floor</button><button type="button" class="btn quiet" data-v="shuffle">Scramble</button><button type="button" class="btn quiet" data-v="clear">Clear layer</button></div>
@@ -727,6 +742,7 @@ export function mount(root) {
   R.rotate.addEventListener('click', () => { if (A.sel != null) turn(A.sel); });
   R.remove.addEventListener('click', () => { if (A.sel != null) { pushHistory(); A.boards[A.layer][A.sel] = null; A.sel = null; renderBoard(); build(); } });
   $$('[data-opt]', root).forEach(x => x.addEventListener('change', () => { A.opts[x.dataset.opt] = x.checked; build(); }));
+  R.cat.addEventListener('change', () => { A.cat = R.cat.value; A.pick = null; renderPalette(); R.palette.scrollTop = 0; });
   R.png.addEventListener('click', () => { const { renderer, scene, camera } = A.three; renderer.render(scene, camera); renderer.domElement.toBlob(b => download(b, 'ProtoSpace-ValveHQ-building.png')); });
   R.plan.addEventListener('click', () => planPicture().toBlob(b => download(b, `ProtoSpace-ValveHQ-plan-${['ground', 'level2', 'level3'][A.layer]}.png`)));
   R.glb.addEventListener('click', () => new GLTFExporter().parse(A.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ.glb'), err => console.error(err), { binary: true }));
