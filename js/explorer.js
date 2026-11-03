@@ -7,8 +7,8 @@
 import * as THREE from 'three';
 import { createViewer } from './viewer.js';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, meshSignedDistance, occupancyOf, isoOf, tidy, blocky, toVox } from './voxelize.js';
-import { blockGeometry } from './isosurface.js';
+import { ACCEPTS, loadModel, loadModelUrl, voxelize, signedDistance, meshSignedDistance, occupancyOf, isoOf, toVox } from './voxelize.js';
+import { organicGeometry, cleanOccupancy } from './isosurface.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -83,11 +83,11 @@ function makeThumbs() {
     d.geo = { g, key, N: d.N };
     return g;
   }
-  /* A tile's solid (or a design's without its mesh) as a SubD-like surface — square edges kept — painted top to base over its own height. */
+  /* A tile's solid (or a design's without its mesh) as an organic SubD-like surface — the inputs' own recipe — painted top to base over its own height. */
   function fieldGeometryOf(src, N, colors) {
     const occ = src.occ; let yMin = N, yMax = 0;
     for (let i = 0; i < occ.length; i++) if (occ[i]) { const y = ((i / N) | 0) % N; if (y < yMin) yMin = y; if (y > yMax) yMax = y; }
-    const span = Math.max(1, yMax + 1 - yMin), g = blockGeometry(occ, N), P = g.getAttribute('position');
+    const span = Math.max(1, yMax + 1 - yMin), g = organicGeometry(occ, N), P = g.getAttribute('position');
     const [top, base] = colors, top3 = new THREE.Color(top).toArray(), base3 = new THREE.Color(base).toArray(), col = new Float32Array(P.count * 3);
     for (let i = 0; i < P.count; i++) { const t = Math.pow(clamp((P.getY(i) - yMin) / span, 0, 1), 2.4); for (let c = 0; c < 3; c++) col[i * 3 + c] = base3[c] + (top3[c] - base3[c]) * t; }
     g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
@@ -213,6 +213,38 @@ function tileMix(n) {                                                           
 }
 
 
+// ------------------------------------------------------------------ the solid of a tile
+/* An in-between's solid is a patchwork of the inputs' own geometry rather than a carving of the averaged field: the
+   cube is divided into regions, each given wholesale to the input that is the more massive there (its distance field
+   smoothed over a few voxels, weighted by the tile's share of that input), rooms, voids and one-voxel walls included.
+   Walls stay thin and flat and rooms stay open; what changes across the map is which input's features appear where,
+   and how much of the cube each one claims. Only inputs with a real share of the tile take part. */
+const XO_BETA = 0.9, XO_MIN_SHARE = 0.12, XO_BLUR = 2;
+function blurred(d) {                                                            // the design's field smoothed by a 5-voxel box, three passes (cached)
+  if (d.sdfBlur && d.sdfBlur.N === d.N) return d.sdfBlur.f;
+  const N = d.N, V = N * N * N; let a = Float32Array.from(d.sdf), b = new Float32Array(V);
+  const pass = (src, dst, stride, len) => { for (let i = 0; i < V; i++) { const line = Math.floor(i / stride) % len, start = i - line * stride; let v = 0, c = 0; for (let k = -XO_BLUR; k <= XO_BLUR; k++) { const l = line + k; if (l < 0 || l >= len) continue; v += src[start + l * stride]; c++; } dst[i] = v / c; } };
+  for (let r = 0; r < 3; r++) { pass(a, b, 1, N); pass(b, a, N, N); pass(a, b, N * N, N); [a, b] = [b, a]; }
+  d.sdfBlur = { f: a, N }; return a;
+}
+function crossover(k, sdf, iso, fill, nD, dists) {
+  const V = sdf.length;
+  if (!dists || !nD) return occupancyOf(sdf, fill);
+  const w = new Float32Array(nD); let sum = 0;
+  for (let i = 0; i < nD; i++) { w[i] = 1 / Math.pow(dists[k * nD + i] + 1e-6, 2.5); sum += w[i]; }
+  const part = []; for (let i = 0; i < nD; i++) { w[i] /= sum; if (w[i] >= XO_MIN_SHARE) part.push(i); }
+  if (!part.length) part.push(w.indexOf(Math.max(...w)));
+  let ws = 0; for (const i of part) ws += w[i];
+  const fields = part.map(i => blurred(E.designs[i])), bias = part.map(i => XO_BETA * w[i] / ws), occs = part.map(i => E.designs[i].occ);
+  const occ = new Uint8Array(V);
+  for (let x = 0; x < V; x++) {
+    let best = 0, bs = Infinity;
+    for (let j = 0; j < part.length; j++) { const s = fields[j][x] - bias[j]; if (s < bs) { bs = s; best = j; } }
+    occ[x] = occs[best][x];
+  }
+  return occ;
+}
+
 // ------------------------------------------------------------------ the map
 function train() {
   if (E.busy || E.designs.length < 2) return;
@@ -224,10 +256,10 @@ function train() {
     const m = e.data;
     if (m.type === 'progress') { setRun(`Training · ${m.it} / ${m.iters}`, m.it / m.iters); return; }
     if (m.type === 'done') {
-      const nodes = [];
+      const nodes = [], nD = E.designs.length;
       for (let k = 0; k < K; k++) {
         const D = V + E.criteria.length + 1, o = k * D, sdf = m.weights.subarray(o, o + V), crit = Array.from(m.weights.subarray(o + V, o + V + E.criteria.length)), fill = m.weights[o + V + E.criteria.length];
-        const iso = isoOf(sdf, fill), occ = blocky(occupancyOf(sdf, fill), N, 3); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
+        const iso = isoOf(sdf, fill), occ = cleanOccupancy(crossover(k, sdf, iso, fill, nD, m.dists), N); let filled = 0; for (let i = 0; i < occ.length; i++) filled += occ[i];
         nodes.push({ k, x: k % E.W, y: (k / E.W) | 0, sdf, iso, occ, N, crit, filled, nearest: m.nearest[k], nearDist: m.nearDist[k], thumb: null });
       }
       E.map = { nodes, weights: m.weights, bmu: m.bmu, bmuD: m.bmuD, dists: m.dists, W: E.W, H: E.H, N, criteria: E.criteria.slice(), umax: 0, nearMax: Math.max(1e-9, ...nodes.map(n => n.nearDist)) };
