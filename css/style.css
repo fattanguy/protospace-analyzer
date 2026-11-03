@@ -430,3 +430,39 @@
 .xp-mix .xp-bar > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .xp-mix .eyebrow { display: block; margin-bottom: 4px; }
 .xp-sw { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; background: linear-gradient(180deg, var(--a), var(--b)); }
+
+/* ░░ Assemble · the office on the lot ░░ */
+.as { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 28px; align-items: start; margin-top: 16px; }
+.as-palette { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.as-pal { font: inherit; color: var(--ink2); background: var(--bg); border: 1.5px solid var(--rule); padding: 4px; cursor: pointer; display: grid; gap: 2px; text-align: left; }
+.as-pal canvas { width: 100%; height: auto; display: block; background: #0a0a0a; }
+.as-pal span { font-size: 10px; line-height: 1.25; letter-spacing: .02em; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-pal span b { font-weight: 600; margin-right: 4px; }
+.as-pal:hover { border-color: var(--ink2); } .as-pal.on { border-color: var(--red); box-shadow: inset 0 0 0 1px var(--red); }
+.as-main { min-width: 0; }
+.as-boardwrap { border: 1px solid var(--rule); padding: 10px 14px 12px; display: grid; gap: 8px; overflow-x: auto; }
+.as-edge { font-size: 11px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--ink3); }
+.as-edge.top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.as-edge.top .seg { display: inline-flex; border: 1px solid var(--rule); }
+.as-boardrow { display: grid; grid-template-columns: 18px auto 18px; gap: 10px; align-items: center; justify-content: start; }
+.as-edge.left, .as-edge.right { writing-mode: vertical-rl; transform: rotate(180deg); text-align: center; }
+.as-edge.right { transform: none; }
+.as-board { --sw: 108px; --sh: 94px; --gx: 19px; --gz: 33px; position: relative; display: grid; grid-template-columns: repeat(var(--cols), var(--sw)); grid-template-rows: repeat(var(--rows), var(--sh)); column-gap: var(--gx); row-gap: var(--gz); padding: 0; outline: none; background: linear-gradient(var(--panel), var(--panel)) padding-box; border: 1px solid var(--rule); }
+.as-slot { position: relative; display: grid; place-items: center; background: #0a0a0a; border: 1px solid var(--rule); cursor: pointer; transition: transform .25s ease, box-shadow .2s; overflow: hidden; }
+.as-slot.empty { background: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--ink3) 18%, transparent) 7px 8px); }
+.as-slot canvas { height: 100%; width: auto; display: block; }
+.as-slot em { position: absolute; left: 4px; top: 2px; font-style: normal; font-size: 11px; font-weight: 600; color: #fff; text-shadow: 0 0 4px #000; }
+.as-slot:hover { border-color: var(--ink2); } .as-slot.sel { border-color: var(--red); box-shadow: inset 0 0 0 2px var(--red); transform: scale(1.03); z-index: 2; }
+.as-link { position: absolute; background: var(--ink); opacity: .9; pointer-events: auto; }
+.as-link.x { left: calc(var(--c) * (var(--sw) + var(--gx)) + var(--sw)); top: calc(var(--r) * (var(--sh) + var(--gz)) + var(--sh) / 2 - 3px); width: var(--gx); height: 6px; }
+.as-link.z { left: calc(var(--c) * (var(--sw) + var(--gx)) + var(--sw) / 2 - 3px); top: calc(var(--r) * (var(--sh) + var(--gz)) + var(--sh)); width: 6px; height: var(--gz); }
+.as-link.wall { background: var(--ink3); opacity: .6; height: 3px; } .as-link.z.wall { height: var(--gz); width: 3px; }
+.as-viewer { position: relative; margin-top: 14px; border: 1px solid var(--rule); background: #0b0b0b; }
+.as-viewer canvas { display: block; width: 100%; height: 560px; }
+.as-compass { position: absolute; left: 12px; bottom: 10px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #9a9a9a; }
+.as-compass button { font: inherit; letter-spacing: inherit; text-transform: inherit; color: #e8e8e8; background: transparent; border: 1px solid #4e4e4e; padding: 3px 8px; margin-left: 4px; cursor: pointer; } .as-compass button:hover { background: #e8e8e8; color: #000; }
+.as-callouts { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px 22px; margin-top: 8px; }
+.as-call { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 0; border-bottom: 1px solid var(--rule); font-size: 13px; }
+.as-call b { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: #fff; font-weight: 600; font-size: 13px; }
+.as-call .n { color: var(--ink); } .as-call .n small { color: var(--ink3); font-size: 12px; }
+@media (max-width: 900px) { .as { grid-template-columns: 1fr; } .xp-controls.as-controls { position: static; max-height: none; } .as-viewer canvas { height: 380px; } }

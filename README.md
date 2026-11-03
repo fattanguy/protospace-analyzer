@@ -60,6 +60,12 @@ Live at the Vercel deployment of this repository.
   two tiles along which the design changes least; *Navigate* brightens the tiles close to
   target scores and marks the least-explored tile. Overlays: nearest design, change between
   tiles (the U-matrix), criteria match. Explore mode spreads designs out, Cluster groups them.
+- **Assemble** — the fifteen spaces as modules of an office for Valve on the One Herald
+  Plaza lot: a sliding-tile plan board (7 × 3 bays, three layers) and the building that follows
+  it in 3D — modules on pilotis, bridges where neighbours share a floor height, garden walls
+  where they do not, strip windows in the thin walls, cores where modules stack, one red stair —
+  with a callout per module of what it is and where it came from (`js/assemble.js`). Any
+  Explorer tile can be sent over with *Build with it*.
 
 ## The field
 

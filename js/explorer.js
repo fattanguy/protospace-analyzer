@@ -512,7 +512,7 @@ const HTML = `
     <div class="xp-pathbar" data-v="pathBar" hidden><span class="hint" data-v="pathNote"></span><button type="button" class="btn quiet" data-v="pathClear">Clear path</button></div>
     <div class="xp-strip" data-v="strip" hidden></div>
     <div class="xp-detail" data-v="detail" hidden>
-      <div class="xp-detailhead"><div data-v="detailHead" class="xp-title"></div><div class="xp-row"><button type="button" class="btn quiet" data-v="pin">Pin</button><button type="button" class="btn quiet" data-v="obj" title="1 unit = 1 voxel. In Rhino: Map OBJ Y to Rhino Z">OBJ · Rhino</button><button type="button" class="btn quiet" data-v="stl" title="Scale it in the slicer">STL · 3D print</button></div></div>
+      <div class="xp-detailhead"><div data-v="detailHead" class="xp-title"></div><div class="xp-row"><button type="button" class="btn quiet" data-v="pin">Pin</button><button type="button" class="btn quiet" data-v="build" title="Send this tile to the Assemble tab as a module of the building">Build with it</button><button type="button" class="btn quiet" data-v="obj" title="1 unit = 1 voxel. In Rhino: Map OBJ Y to Rhino Z">OBJ · Rhino</button><button type="button" class="btn quiet" data-v="stl" title="Scale it in the slicer">STL · 3D print</button></div></div>
       <div class="xp-detailbody"><div data-v="viewer"></div><div class="xp-detailcrit" data-v="detailCrit"></div></div>
     </div>
   </div>
@@ -585,6 +585,14 @@ export function mount(root, hooks = {}) {
   R.targets.addEventListener('input', e => { const t = e.target.closest('[data-target]'); if (!t) return; E.targets[+t.dataset.target] = +t.value; t.nextElementSibling.textContent = (+t.value).toFixed(2); renderMap(); renderDetail(); });
   R.pathClear.addEventListener('click', () => { E.path = { a: null, b: null, cells: null }; renderTools(); });
   R.pin.addEventListener('click', () => togglePin(E.sel));
+  R.build.addEventListener('click', () => {                                      // hand the tile to the Assemble tab, with where it came from
+    const m = E.map, n = m && m.nodes[E.sel]; if (!n) return;
+    const owners = m.bmu.map((k, i) => k === n.k ? E.designs[i] : null).filter(Boolean), own = owners[0];
+    const mix = m.dists ? tileMix(n).slice(0, 2).map(([i, w]) => `${Math.round(w * 100)} % ${E.designs[i].name}`).join(' · ') : '';
+    const use = own && own.space ? (+own.space <= 5 ? 'lobby' : +own.space <= 10 ? 'office' : 'social') : 'som';
+    const name = own ? own.name : `Map tile ${n.x + 1}·${n.y + 1}`, note = own ? (own.note || 'from the Explorer') : `Explorer map ${E.W} × ${E.H} of ${E.designs.map(d => d.letter).join('')} · tile ${n.x + 1}·${n.y + 1} · ${mix}`;
+    window.dispatchEvent(new CustomEvent('xp:build', { detail: { name, occ: n.occ, N: m.N, note, use } }));
+  });
   R.obj.addEventListener('click', () => E.viewer && E.viewer.exportOBJ(tileName()));
   R.stl.addEventListener('click', () => E.viewer && E.viewer.exportSTL(tileName()));
   root.addEventListener('click', e => {

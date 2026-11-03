@@ -10,6 +10,7 @@ import { createViewer } from './viewer.js';
 import { bayBoxes, measureBay, programScores, highlightCells, signature, pickDistinct, HIGHLIGHTS, PROGRAMS, PROGRAM_KEYS } from './program.js';
 import { GUIDE, READING } from './guide.js';
 import { mount as mountExplorer } from './explorer.js';
+import { mount as mountAssemble } from './assemble.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -435,7 +436,7 @@ async function scanAnimation() {
 }
 
 // ------------------------------------------------------------------ tabs
-const TAB_OF = { generator: 'generator', analyze: 'analyze', program: 'program', model: 'model', explorer: 'explorer' };
+const TAB_OF = { generator: 'generator', analyze: 'analyze', program: 'program', model: 'model', explorer: 'explorer', assemble: 'assemble' };
 function showTab(name) {
   name = TAB_OF[name] || 'generator';
   A.tab = name;
@@ -444,6 +445,7 @@ function showTab(name) {
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
   window.scrollTo({ top: 0 });
   if (name === 'explorer') { if (A.explorer) A.explorer.show(); }
+  else if (name === 'assemble') { if (A.assemble) A.assemble.show(); }
   else if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'program') renderProgram(); }
   window.dispatchEvent(new Event('resize'));
 }
@@ -479,6 +481,8 @@ function boot() {
     rate: vox => analyzeVox(vox, vox.threshold).result.ratings,
     frameBays: () => A.item ? bayBoxes(A.item.vox).map(b => ({ name: `${A.animId === 'current' ? 'On screen' : animName(A.animId)} · frame ${A.frame} · bay ${b.i + 1}`, frame: `${A.animId === 'current' ? 'the Generator' : animName(A.animId)}, frame ${A.frame}`, vox: A.item.vox, box: { x0: b.x0, x1: b.x1, y0: 0, y1: A.item.vox.ny, z0: 0, z1: A.item.vox.nz } })) : null,
   });
+  A.assemble = mountAssemble($('#assembleRoot'));
+  window.addEventListener('xp:build', e => { A.assemble.addModule(e.detail); showTab('assemble'); });
   PSGen.mount({
     analyze: (vox, thr) => analyzeVox(vox, thr),
     onAnalyzeFrame: (settings, frame) => { A.animId = 'current'; A.frame = frame; fillPickers(); A.dirty = true; showTab('analyze'); },
