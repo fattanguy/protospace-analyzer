@@ -114,6 +114,8 @@ function planOf(m, rot) {
     const [px, py] = map(x, z), t = 0.35 + 0.65 * (h / top);
     g.fillStyle = shade(col, t); g.fillRect(px, py, cell + 0.5, cell + 0.5);
   }
+  { const side = sidesOf(m, rot).open, w = 3; g.fillStyle = 'rgba(255,255,255,0.75)';                      // a light bar on the open facade
+    if (side === 'E') g.fillRect(0, S - w, S, w); else if (side === 'W') g.fillRect(0, 0, S, w); else if (side === 'N') g.fillRect(0, 0, w, S); else g.fillRect(S - w, 0, w, S); }
   g.fillStyle = 'rgba(255,255,255,0.55)';
   for (const [x, y, z] of floors) if (y <= 2) { const [px, py] = map(x, z); g.fillRect(px + cell * 0.3, py + cell * 0.3, cell * 0.4, cell * 0.4); }
   m.plans[rot] = c; return c;
@@ -138,14 +140,16 @@ function adjacent(a, b) { const [ca, ra] = cellOf(a), [cb, rb] = cellOf(b); retu
 function autoArrange(seed = Date.now() % 1000) {
   let sd = (seed * 9301 + 49297) % 233280; const rnd = () => (sd = (sd * 9301 + 49297) % 233280) / 233280;
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-  const by = u => A.modules.filter(m => m.use === u && (m.source === 'catalogue' || u === 'som')), rot = () => (rnd() < 0.75 ? 1 : 3);
+  const by = u => A.modules.filter(m => m.use === u && (m.source === 'catalogue' || u === 'som'));
+  // every module is turned to face: lobbies open to their public edge (the street, or the causeway they sit on), everything else to the bay
+  const facing = (m, k) => { const [c, r] = cellOf(k); return rotFacing(m, m.use === 'lobby' ? (r === 0 ? 'W' : c === 0 ? 'N' : c === SITE.cols - 1 ? 'S' : 'W') : 'E'); };
   for (let i = 0; i < 3; i++) clearLayer(i);
   // the programme: every module once, two offices and a gathering room twice (the cabal floors), dealt out lobby · office · gathering in turn
   const pools = { lobby: shuffle(by('lobby')), office: shuffle(by('office').concat(by('som'))), social: shuffle(by('social')) };
   pools.office = pools.office.concat(pools.office.slice(0, 2)); pools.social = pools.social.concat(pools.social.slice(0, 1));   // the cabal floors: two offices and a gathering room again
   // the street row first: lobbies and gathering rooms alternating along the whole front, starting with either
   let u = rnd() < 0.5 ? 'lobby' : 'social';
-  for (let c = 0; c < SITE.cols; c++) { const m = pools[u].shift(); if (m) place(0, idx(c, 0), m, rot()); u = u === 'lobby' ? 'social' : 'lobby'; }
+  for (let c = 0; c < SITE.cols; c++) { const m = pools[u].shift(); if (m) place(0, idx(c, 0), m, facing(m, idx(c, 0))); u = u === 'lobby' ? 'social' : 'lobby'; }
   const queue = []; while (pools.lobby.length || pools.office.length || pools.social.length) for (const w of ['lobby', 'office', 'social']) if (pools[w].length) queue.push(pools[w].shift());
   const publicEdge = (c, r) => r === 0 || c === 0 || c === SITE.cols - 1;
   const usesAround = (L, k) => { const out = []; for (const j of neighboursOf(k)) if (A.boards[L][j]) out.push(A.boards[L][j].mod.use); if (L > 0 && A.boards[L - 1][k]) out.push(A.boards[L - 1][k].mod.use); if (L < 2 && A.boards[L + 1][k]) out.push(A.boards[L + 1][k].mod.use); return out; };
@@ -164,7 +168,7 @@ function autoArrange(seed = Date.now() % 1000) {
       sc += rnd() * 1.6;
       if (sc > bestS) { bestS = sc; best = { L, k }; }
     }
-    if (best) place(best.L, best.k, m, rot());
+    if (best) place(best.L, best.k, m, facing(m, best.k));
   }
   // hybrids where the connections are not optimal: a module is weakly joined when one of its seams would stay open
   // (no mass of its neighbour meets its own). For every empty bay beside such a module — or on top of it — every
@@ -194,19 +198,29 @@ function autoArrange(seed = Date.now() % 1000) {
 function sidesOf(m, rot) {
   m.sides ||= {}; if (m.sides[rot]) return m.sides[rot];
   const n = N, occS = new Uint8Array(n * n * n); let umin = n, umax = -1, vmin = n, vmax = -1, ymin = n, ymax = -1;
+  const low = new Int8Array(n * n).fill(-1), top = new Int8Array(n * n).fill(-1);                        // per column (u, v): lowest and highest solid voxel
   for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     if (!m.occ[x + n * (y + n * z)]) continue; const [u, v] = latToSlot(x, z, rot); occS[u + n * (y + n * v)] = 1;
     if (u < umin) umin = u; if (u > umax) umax = u; if (v < vmin) vmin = v; if (v > vmax) vmax = v; if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+    const q = u + n * v; if (low[q] < 0 || y < low[q]) low[q] = y; if (y > top[q]) top[q] = y;
   }
-  const S = new Uint32Array(n), Nn = new Uint32Array(n), E = new Uint32Array(n), W = new Uint32Array(n), T = new Uint32Array(n), B = new Uint32Array(n);   // S/N over (y → bits v), E/W over (y → bits u), T/B over (u → bits v)
+  const S = new Uint32Array(n), Nn = new Uint32Array(n), E = new Uint32Array(n), W = new Uint32Array(n), T = new Uint32Array(n), B = new Uint32Array(n), Pu = new Uint32Array(n), Pv = new Uint32Array(n);   // S/N over (y → bits v), E/W over (y → bits u), T/B over (u → bits v); Pu/Pv the whole silhouette seen along u / along v
   for (let v = 0; v < n; v++) for (let y = 0; y < n; y++) for (let u = 0; u < n; u++) {
     if (!occS[u + n * (y + n * v)]) continue;
+    Pu[y] |= 1 << v; Pv[y] |= 1 << u;
     if (u >= umax - 2) S[y] |= 1 << v; if (u <= umin + 2) Nn[y] |= 1 << v;
     if (v >= vmax - 2) E[y] |= 1 << u; if (v <= vmin + 2) W[y] |= 1 << u;
     if (y >= ymax - 2) T[u] |= 1 << v; if (y <= ymin + 2) B[u] |= 1 << v;
   }
-  return (m.sides[rot] = { S, N: Nn, E, W, T, B });
+  // the open facade: the side whose first three slices close the least of the silhouette behind them
+  const pop = a => { let c = 0; for (let i = 0; i < a.length; i++) { let x = a[i]; while (x) { x &= x - 1; c++; } } return c; };
+  const openness = { S: 1 - pop(S) / Math.max(1, pop(Pu)), N: 1 - pop(Nn) / Math.max(1, pop(Pu)), E: 1 - pop(E) / Math.max(1, pop(Pv)), W: 1 - pop(W) / Math.max(1, pop(Pv)) };
+  const open = Object.keys(openness).sort((a, b) => openness[b] - openness[a])[0];
+  return (m.sides[rot] = { S, N: Nn, E, W, T, B, Pu, Pv, openness, open, low, top });
 }
+/* The turn that puts the module's open facade on a given side (E = the bay, W = the street, N / S = the causeways). */
+function rotFacing(m, side) { for (let r = 0; r < 4; r++) if (sidesOf(m, r).open === side) return r; return 1; }
+const SIDE_NAME = { E: 'east — the bay', W: 'west — the street', N: 'north — the Venetian Causeway', S: 'south — the MacArthur Causeway' };
 const overlap = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] & b[i]) return true; return false; };
 function joinsAt(L, k, m, rot) {
   const [c, r] = cellOf(k), mine = sidesOf(m, rot), out = [];
@@ -314,6 +328,35 @@ const DECK_T = 0.7;                                                             
    edge is smooth, not stepped), with a column on a 6 m grid wherever the pad is. The pad is drawn in the module's own
    lattice and put where the module is: through the lattice frame when the building is fused, through the mesh's
    placement matrix when the modules are separate. */
+/* Continuous lattice (X, Z) of a placed module → world (x, z): through the mesh matrix when the modules are separate,
+   through the lattice turned on the board when the building is fused. */
+function worldMapper(t, k, M) {
+  const m = t.mod, n = N, [c, r] = cellOf(k), o = slotOrigin(c, r);
+  return (X, Z) => {
+    if (M) { const [lx, , lz] = latticeToLocal(m, X, 0, Z); const v = new THREE.Vector3(lx, 0, lz).applyMatrix4(M); return [v.x, v.z]; }
+    const [U, V] = [[X, Z], [n - Z, X], [n - X, n - Z], [Z, n - X]][t.rot & 3];
+    return [o.x + (U - 1) * LAT, o.z - (V - 1) * LAT];
+  };
+}
+/* Pillars under an overhang: a module above the ground stands on what is below it; wherever a 6 m grid point of its
+   footprint has nothing under it — no module in the bay at a lower layer with mass in that column, or one whose roof
+   is more than 1.5 m below — a column runs from the roof below (or the ground) up to its underside. */
+function pillarsFor(t, k, L, building, M = null) {
+  const n = N, me = sidesOf(t.mod, t.rot), o = slotOrigin(...cellOf(k)), toWorld = worldMapper(t, k, M), cols = [];
+  const yBottom = (L2, y) => (PODIUM_V + L2 * PITCH_V - 1 + y) * LAT, yTopOf = (L2, y) => (PODIUM_V + L2 * PITCH_V + y) * LAT;
+  for (let v = 0; v < n; v++) for (let u = 0; u < n; u++) {
+    const yl = me.low[u + n * v]; if (yl < 0) continue;
+    const [wx, wz] = toWorld(u + 0.5, v + 0.5), sx = Math.round((wx - o.x) / LAT - 0.5), sz = Math.round((o.z - wz) / LAT - 0.5);
+    if (((sx - 3) % 6 + 6) % 6 || ((sz - 3) % 6 + 6) % 6) continue;                                           // the 6 m grid of the bay
+    let support = 0;                                                                                            // the ground
+    for (let L2 = L - 1; L2 >= 0; L2--) { const t2 = A.boards[L2][k]; if (!t2) continue; const yt = sidesOf(t2.mod, t2.rot).top[u + n * v]; if (yt >= 0) { support = yTopOf(L2, yt); break; } }
+    const bottom = yBottom(L, yl); if (bottom - support > 1.5) cols.push([wx, wz, support, bottom]);
+  }
+  if (!cols.length) return;
+  const geo = new THREE.CylinderGeometry(0.35, 0.35, 1, 12), inst = new THREE.InstancedMesh(geo, COLUMN, cols.length), tmp = new THREE.Object3D();
+  cols.forEach(([x, z, y0, y1], i) => { tmp.position.set(x, (y0 + y1) / 2, z); tmp.scale.set(1, y1 - y0 + 0.2, 1); tmp.updateMatrix(); inst.setMatrixAt(i, tmp.matrix); });
+  inst.castShadow = true; building.add(inst);
+}
 function deckFor(t, k, building, M = null) {
   const m = t.mod, n = N, y0 = m.an.bounds.ymin, [c, r] = cellOf(k), o = slotOrigin(c, r);
   const M0 = -4, W = n + 8, at = (x, z) => (x - M0) + W * (z - M0);
@@ -322,12 +365,7 @@ function deckFor(t, k, building, M = null) {
   const grow = (src, rad, all) => { const out = new Uint8Array(src.length); for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) { let n1 = 0, tot = 0; for (let dj = -rad; dj <= rad; dj++) for (let di = -rad; di <= rad; di++) { const I = i + di, J = j + dj; tot++; if (I >= 0 && J >= 0 && I < W && J < W && src[I + W * J]) n1++; } out[i + W * j] = all ? (n1 === tot ? 1 : 0) : (n1 ? 1 : 0); } return out; };
   mask = grow(grow(mask, 3, false), 1, true);                                     // dilate 3, erode 1: +2 all round, gaps up to 6 voxels bridged
   if (!mask.some(Boolean)) return;
-  // continuous lattice (X, Z) → world (x, z)
-  const toWorld = (X, Z) => {
-    if (M) { const [lx, , lz] = latticeToLocal(m, X, 0, Z); const v = new THREE.Vector3(lx, 0, lz).applyMatrix4(M); return [v.x, v.z]; }
-    const [U, V] = [[X, Z], [n - Z, X], [n - X, n - Z], [Z, n - X]][t.rot & 3];   // the lattice turned on the board (latToSlot for a continuous coordinate)
-    return [o.x + (U - 1) * LAT, o.z - (V - 1) * LAT];
-  };
+  const toWorld = worldMapper(t, k, M);
   // the slab: the mask at twice the resolution, one cell thick, contoured and smoothed
   const S = 2 * W + 2, H = 4, occ = new Uint8Array(S * H * S);
   for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) if (mask[i + W * j]) for (let dj = 0; dj < 2; dj++) for (let di = 0; di < 2; di++) occ[(2 * i + 1 + di) + S * (1 + H * (2 * j + 1 + dj))] = 1;
@@ -349,7 +387,7 @@ function deckFor(t, k, building, M = null) {
 /* Deck, pilotis and letter for a placed module — the parts both building modes share. */
 function furnish(t, k, L, tag, building, labels, M = null) {
   const [c, r] = cellOf(k);
-  if (L === 0) deckFor(t, k, building, M);
+  if (L === 0) deckFor(t, k, building, M); else pillarsFor(t, k, L, building, M);
   if (A.opts.labels) { const sp = label(tag, slotCentre(c, r).x, PODIUM + L * PITCH + MOD_H + 4, slotCentre(c, r).z, USE[t.mod.use] ? USE[t.mod.use].c : '#888'); sp.userData.slot = `${L}:${k}`; labels.add(sp); }
 }
 function cores(building) {                                                        // separate modules only: a stair-and-lift tower beside each stack; the first is the red stair (the fused body grows its own)
@@ -543,7 +581,7 @@ function glide(before) {
 }
 function tileInfo(L, k) {                                                          // what a tile is and how it joins its neighbours, for the tooltip
   const t = A.boards[L][k]; if (!t) return '';
-  const lines = [`<b>${esc(t.mod.id)} ${esc(t.mod.name)}</b> <small>· ${esc(t.mod.typology)} · turned ${t.rot * 90}°</small>`];
+  const face = sidesOf(t.mod, t.rot).open, lines = [`<b>${esc(t.mod.id)} ${esc(t.mod.name)}</b> <small>· ${esc(t.mod.typology)} · turned ${t.rot * 90}°</small>`, `${t.mod.use === 'lobby' ? 'opens' : face === 'E' ? 'opens' : '<i>opens</i>'} to the ${SIDE_NAME[face]}${t.mod.use !== 'lobby' && face !== 'E' ? ' <i>— turn it (R) to face the bay</i>' : ''}`];
   const names = { S: 'south', N: 'north', E: 'east (bay side)', W: 'west (street side)' };
   for (const pr of pairsOf(L)) {
     if (pr.a !== k && pr.b !== k) continue; const other = A.boards[L][pr.a === k ? pr.b : pr.a]; if (!other) continue;
@@ -553,7 +591,7 @@ function tileInfo(L, k) {                                                       
   const below = L > 0 && A.boards[L - 1][k], above = L < 2 && A.boards[L + 1][k];
   if (below) lines.push(`stacked on ${esc(below.mod.id)} ${esc(below.mod.name)}`); else if (L > 0) lines.push('<i>nothing below — it floats; stack it on a module</i>');
   if (above) lines.push(`${esc(above.mod.id)} ${esc(above.mod.name)} stacked on top`);
-  if (!lines.some((l, i) => i > 0 && !/float/.test(l))) lines.push('<i>no neighbours yet — slide it next to another module</i>');
+  if (!lines.some((l, i) => i > 1 && !/float/.test(l))) lines.push('<i>no neighbours yet — slide it next to another module</i>');
   return lines.join('<br>');
 }
 function showTip(L, k, at) {                                                        // under the tile (above it near the bottom of the window), or under a point in the 3D view
@@ -563,7 +601,7 @@ function showTip(L, k, at) {                                                    
   R.tip.style.top = `${s.bottom + 10 + r.height > vh - 8 ? s.top - r.height - 10 : s.bottom + 10}px`;
 }
 function hideTip() { R.tip.hidden = true; }
-/* The building score: six things the brief asks for, each 0–100, and goals ticked when they are met. */
+/* The building score: seven things the brief asks for, each 0–100, and goals ticked when they are met. */
 function score() {
   const mods = []; for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (t) mods.push({ t, k, L }); });
   if (!mods.length) return { total: 0, parts: [], goals: [] };
@@ -574,13 +612,14 @@ function score() {
   const around = m => { const out = []; for (const j of neighboursOf(m.k)) if (A.boards[m.L][j]) out.push(A.boards[m.L][j].mod.use); if (m.L > 0 && A.boards[m.L - 1][m.k]) out.push(A.boards[m.L - 1][m.k].mod.use); if (m.L < 2 && A.boards[m.L + 1][m.k]) out.push(A.boards[m.L + 1][m.k].mod.use); return out; };
   const withNb = mods.filter(m => around(m).length), mixed = withNb.length ? 100 * withNb.filter(m => around(m).some(u => u !== m.t.mod.use)).length / withNb.length : 100;
   const touching = m => around(m).length;
+  const others = mods.filter(m => m.t.mod.use !== 'lobby'), toBay = others.length ? 100 * others.filter(m => sidesOf(m.t.mod, m.t.rot).open === 'E').length / others.length : 100;
   const shared = gat.length ? 100 * gat.filter(m => touching(m) >= 2).length / gat.length : 100;
   const floating = mods.filter(m => m.L > 0 && !A.boards[m.L - 1][m.k]).length, grounded = 100 * (1 - floating / mods.length);
   let seams = 0, faces = 0; for (const m of mods) { seams += touching(m); faces += m.L > 0 ? 5 : 4; }
   const compact = Math.min(100, 100 * seams / Math.max(1, faces) * 2.2);
-  const parts = [['Joined', joined, 'one building, not separate pieces'], ['Public edge', street, 'lobbies at ground on the street row or a causeway side'], ['Mixed', mixed, 'every module touching a module of another use — no block of one kind'], ['Shared rooms', shared, 'each gathering room touching two or more modules'], ['Grounded', grounded, 'nothing floating'], ['Compact', compact, 'modules touching, not scattered']];
+  const parts = [['Joined', joined, 'one building, not separate pieces'], ['Public edge', street, 'lobbies at ground on the street row or a causeway side'], ['Mixed', mixed, 'every module touching a module of another use — no block of one kind'], ['Shared rooms', shared, 'each gathering room touching two or more modules'], ['Open to the bay', toBay, 'every module but the lobbies turned so its open facade faces the bay (R turns a tile)'], ['Grounded', grounded, 'nothing floating'], ['Compact', compact, 'modules touching, not scattered']];
   const total = Math.round(parts.reduce((s, p) => s + p[1], 0) / parts.length);
-  const goals = [['One connected building', g.groups === 1], ['Every lobby on a public edge', lob.length > 0 && street === 100], ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100], ['Every gathering room is shared', gat.length > 0 && shared === 100], ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15], ['Nothing floats', floating === 0]];
+  const goals = [['One connected building', g.groups === 1], ['Every lobby on a public edge', lob.length > 0 && street === 100], ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100], ['Every gathering room is shared', gat.length > 0 && shared === 100], ['Workspaces and gathering rooms open to the bay', others.length > 0 && toBay === 100], ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15], ['Nothing floats', floating === 0]];
   return { total, parts, goals, floating };
 }
 function renderScore() {
