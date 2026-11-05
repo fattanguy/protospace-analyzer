@@ -98,7 +98,10 @@ export function unionField(fields, pad, kOf) {
 /* The union resampled `s` times finer (trilinear) and turned into the field to contour:
    kind 'shell' → hollow walls of thickness t (or the solid when t ≤ 0); kind 'floors' → plates of thickness tf every
    H metres from yBase (metres), only inside the walls. yOf(gy) → world height of grid y (metres). */
-export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 0, yOf }) {
+export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 0, yOf, holeAt = null, windows = null }) {
+  /* holeAt(level, gx, gz) → signed distance (metres, negative inside) to the openings cut in that level's plate —
+     voids, stairwells, lift shafts. windows = { sill, head } → a ribbon window cut through every near-vertical wall in
+     each storey, from `sill` above the floor to `head` below the next one. */
   const FX = (U.nx - 1) * s + 1, FY = (U.ny - 1) * s + 1, FZ = (U.nz - 1) * s + 1, out = new Float32Array(FX * FY * FZ);
   const { nx, ny, f } = U, sxy = nx * ny;
   const ys = new Float32Array(FY); for (let y = 0; y < FY; y++) ys[y] = yOf(U.y0 + y / s);
@@ -107,15 +110,33 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
     const zc = z / s, z0 = Math.min(U.nz - 2, Math.floor(zc)), tz = zc - z0;
     for (let y = 0; y < FY; y++) {
       const yc = y / s, y0 = Math.min(ny - 2, Math.floor(yc)), ty = yc - y0, wy = ys[y];
-      let plate = 0;
-      if (kind === 'floors') { let q = (wy - yBase) % H; if (q < 0) q += H; if (q > H / 2) q -= H; plate = Math.abs(q + tf / 2) - tf / 2; }   // the plate's top on the level line
+      let plate = 0, level = Math.round((wy - yBase) / H), winY = 1e9;
+      if (kind === 'floors') { let q = (wy - yBase) % H; if (q < 0) q += H; if (q > H / 2) q -= H; plate = Math.abs(q - tf / 2) - tf / 2; }   // the plate lies on the level line
+      if (windows && wy > yBase + 0.3) { let q = (wy - yBase) % H; if (q < 0) q += H; winY = Math.max(windows.sill - q, q - (H - windows.head)); }   // negative inside the band
       for (let x = 0; x < FX; x++, o++) {
         const xc = x / s, x0 = Math.min(nx - 2, Math.floor(xc)), tx = xc - x0, b = x0 + nx * (y0 + ny * z0);
         const c00 = f[b] + (f[b + 1] - f[b]) * tx, c10 = f[b + nx] + (f[b + nx + 1] - f[b + nx]) * tx;
         const c01 = f[b + sxy] + (f[b + sxy + 1] - f[b + sxy]) * tx, c11 = f[b + sxy + nx] + (f[b + sxy + nx + 1] - f[b + sxy + nx]) * tx;
         const c0 = c00 + (c10 - c00) * ty, c1 = c01 + (c11 - c01) * ty, v = c0 + (c1 - c0) * tz;
-        if (kind === 'shell') out[o] = t > 0 ? Math.max(v, -(v + t)) : v;
-        else out[o] = Math.max(plate, v + t);
+        if (kind === 'shell') {
+          let w = t > 0 ? Math.max(v, -(v + t)) : v;
+          if (winY < 0.6 && w < 0.6) {                                                   // near a wall, in the window band: is the wall upright here?
+            const cx = Math.min(nx - 2, Math.max(1, Math.round(xc))), cy = Math.min(ny - 2, Math.max(1, Math.round(yc))), cz = Math.min(U.nz - 2, Math.max(1, Math.round(zc))), c = cx + nx * (cy + ny * cz);
+            const gx = f[c + 1] - f[c - 1], gy = f[c + nx] - f[c - nx], gz = f[c + sxy] - f[c - sxy];
+            if (gy * gy < 0.2 * (gx * gx + gy * gy + gz * gz)) w = Math.max(w, -winY);
+          }
+          out[o] = w;
+        } else {
+          let w = Math.max(plate, v);                                               // out to the outer face — the lowest plate is the module's own floor —
+          if (w < 0.6) {                                                             // but only under a room: 1.5 m above it must be inside the walls
+            const y2 = Math.min(ny - 1.001, yc + 1.5 / ((ys[Math.min(FY - 1, y + 1)] - ys[Math.max(0, y - 1)]) / (2 / s) || 1)), q0 = Math.floor(y2), qt = y2 - q0, bb = x0 + nx * (q0 + ny * z0);
+            const d00 = f[bb] + (f[bb + 1] - f[bb]) * tx, d10 = f[bb + nx] + (f[bb + nx + 1] - f[bb + nx]) * tx, d01 = f[bb + sxy] + (f[bb + sxy + 1] - f[bb + sxy]) * tx, d11 = f[bb + sxy + nx] + (f[bb + sxy + nx + 1] - f[bb + sxy + nx]) * tx;
+            const e0 = d00 + (d10 - d00) * qt, e1 = d01 + (d11 - d01) * qt, above = e0 + (e1 - e0) * tz;
+            w = Math.max(w, above + t);
+          }
+          if (holeAt && w < 0.6) w = Math.max(w, -holeAt(level, U.x0 + xc, U.z0 + zc));
+          out[o] = w;
+        }
       }
     }
   }

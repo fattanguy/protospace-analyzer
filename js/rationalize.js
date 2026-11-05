@@ -13,13 +13,14 @@ import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { moduleField, unionField, detailField, netsField } from './sdf.js';
 import { taubin } from './fuse.js';
+import { planInterior, buildInterior, toPLY, ELEMENTS } from './interior.js';
 
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, view: 'solid', floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
-const hollow = () => S.view === 'hollow';                                          // 'solid': the modules as they look, opaque · 'hollow': walls, floors, see-through
+const hollow = () => S.view !== 'solid';                                          // 'solid': the modules as they look, opaque · 'hollow': walls, floors, see-through
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
 let R = {};
 
@@ -73,28 +74,49 @@ function makeMeshes() {
     for (let i = 0; i < pos.length; i += 3) { const gx = U.x0 + pos[i] / fine, gy = U.y0 + pos[i + 1] / fine, gz = U.z0 + pos[i + 2] / fine; pos[i] = b.gridX(gx); pos[i + 1] = b.gridY(gy); pos[i + 2] = b.gridZ(gz); }
   };
   const labelsOf = (pos, fine) => { const L = new Int16Array(pos.length / 3); for (let v = 0; v < L.length; v++) { const x = Math.round(pos[v * 3] / fine), y = Math.round(pos[v * 3 + 1] / fine), z = Math.round(pos[v * 3 + 2] / fine); L[v] = U.lab[Math.min(U.nx - 1, x) + U.nx * (Math.min(U.ny - 1, y) + U.ny * Math.min(U.nz - 1, z))] - 1; } return L; };
+  const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = Math.max(S.tf, 1.1 * step), yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
+  B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
   const mesh = (kind, mat) => {
-    const step = b.LAT / s, D = detailField(U, s, kind, { t: hollow() ? Math.max(S.t, 1.1 * step) : 0, tf: Math.max(S.tf, 1.1 * step), H: S.H, yBase: b.PODIUM_V * b.LAT, yOf });   // nothing thinner than the sampling step, or it falls between samples
-    const { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && hollow() && S.windows ? { sill: 1.0, head: 1.0 } : null });
+    let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
     taubin(pos, index, kind === 'shell' ? 3 : 1);
     toWorld(pos, s);
+    if (kind === 'floors') index = dropSmall(pos, index, 30);                        // no scraps of floor in the corners of curved rooms
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(index, 1));
     g.computeVertexNormals();
     const col = new Float32Array(pos.length); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.userData.labels = labels; g.userData.base = new THREE.Color(kind === 'shell' ? 0xe9e5de : 0xa79f93);
+    g.userData.labels = labels; g.userData.base = new THREE.Color(kind === 'shell' ? 0xe9e5de : 0xa79f93); g.userData.element = kind === 'shell' ? 0 : 1;
     const m = new THREE.Mesh(g, mat); m.name = kind === 'shell' ? 'Valve HQ · shell' : 'Valve HQ · floor plates'; m.castShadow = m.receiveShadow = true;
-    B.three.building.add(m); return { m, cells: D.F.reduce((n, v) => n + (v < 0 ? 1 : 0), 0) };
+    B.three.building.add(m); let cells = 0; for (let i = 0; i < D.F.length; i++) if (D.F[i] < 0) cells++; return { m, cells };
   };
-  const sh = mesh('shell', B.three.SHELL);
+  const sh = S.view !== 'interior' ? mesh('shell', B.three.SHELL) : null;            // "Interior only" draws no shell at all
   const fl = hollow() && S.floors ? mesh('floors', B.three.FLOOR) : null;
-  const cell = Math.pow(b.LAT / s, 3);
-  B.stats = { tris: [sh, fl].reduce((n, x) => n + (x ? x.m.geometry.index.count / 3 : 0), 0), floorArea: fl ? fl.cells * cell / Math.max(S.tf, 1.1 * b.LAT / s) : 0, wallVol: sh ? sh.cells * cell : 0 };
-  B.box = new THREE.Box3(); B.three.building.children.forEach(o => { o.geometry.computeBoundingBox(); B.box.union(o.geometry.boundingBox); });
+  if (B.plan) B.three.interior.add(buildInterior(B.plan, { LAT: b.LAT, gridX: b.gridX, gridZ: b.gridZ, mats: B.three.PARTS, H: S.H, tf, t }));
+  const cell = Math.pow(b.LAT / s, 3), pl = B.plan;
+  B.stats = { tris: [sh, fl].reduce((n, x) => n + (x ? x.m.geometry.index.count / 3 : 0), 0), floorArea: fl ? fl.cells * cell / tf : 0, wallVol: sh ? sh.cells * cell : 0,
+    voids: pl ? pl.atria.reduce((n, v) => n + v.cut.length, 0) : 0, atrium: pl ? pl.atria.some(v => v.main && v.cut.length > 1) : false, stairs: pl ? pl.stairs.length : 0, lifts: pl ? pl.lifts.length : 0, walls: pl ? pl.walls.length : 0 };
+  B.box = new THREE.Box3(); [B.three.building, B.three.interior].forEach(g => g.traverse(o => { if (o.isMesh) B.box.expandByObject(o); }));
   paint(); applyCuts(); applyLook();
 }
-function clearMeshes() { if (!B.three) return; const g = B.three.building; while (g.children.length) { const o = g.children.pop(); o.geometry?.dispose(); } }
+/* Keep only the connected pieces of a mesh whose (one-sided) area is at least minArea m². */
+function dropSmall(pos, index, minArea) {
+  const nv = pos.length / 3, parent = new Int32Array(nv); for (let i = 0; i < nv; i++) parent[i] = i;
+  const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  for (let t = 0; t < index.length; t += 3) { const a = find(index[t]), b = find(index[t + 1]), c = find(index[t + 2]); parent[b] = a; parent[find(c)] = a; }
+  const area = new Map();
+  for (let t = 0; t < index.length; t += 3) {
+    const i = index[t] * 3, j = index[t + 1] * 3, k = index[t + 2] * 3, ux = pos[j] - pos[i], uy = pos[j + 1] - pos[i + 1], uz = pos[j + 2] - pos[i + 2], vx = pos[k] - pos[i], vy = pos[k + 1] - pos[i + 1], vz = pos[k + 2] - pos[i + 2];
+    const r = find(index[t]); area.set(r, (area.get(r) || 0) + Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2);
+  }
+  const out = []; for (let t = 0; t < index.length; t += 3) if (area.get(find(index[t])) >= minArea * 2) out.push(index[t], index[t + 1], index[t + 2]);   // a plate has a top and a bottom
+  return index instanceof Uint16Array ? new Uint16Array(out) : new Uint32Array(out);
+}
+function clearMeshes() {
+  if (!B.three) return;
+  for (const g of [B.three.building, B.three.interior]) while (g.children.length) { const o = g.children.pop(); o.traverse(c => c.geometry?.dispose()); }
+}
 
 // ------------------------------------------------------------------ the look: colours, highlight, see-through, cuts
 function paint() {
@@ -110,7 +132,7 @@ function paint() {
   }
 }
 function applyLook() {
-  const { SHELL } = B.three, o = hollow() ? S.opacity : 1;
+  const { SHELL } = B.three, o = S.view === 'hollow' ? S.opacity : 1;
   SHELL.opacity = o; SHELL.transparent = o < 0.999; SHELL.depthWrite = o >= 0.999; SHELL.needsUpdate = true;
 }
 function applyCuts() {
@@ -127,7 +149,7 @@ const HTML = `
 <div class="as rz">
   <aside class="xp-controls as-controls" aria-label="Rationalize controls">
     <h2 class="eyebrow">Show the modules</h2>
-    <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button></div>
+    <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button><button type="button" class="btn quiet" data-mode="interior">Interior only</button></div>
     <p class="hint" data-v="modeNote"></p>
     <h2 class="eyebrow" style="margin-top:16px">Merging</h2>
     ${slider('k', 'Merge · every pair', 0, KMAX, 0.25, 'm', 'How far the modules reach for each other: 0 keeps them apart across their 1 m seams; a few metres grows a fillet between neighbours until they read as one mass, and their rooms open into each other.')}
@@ -140,6 +162,13 @@ const HTML = `
     <label class="chk"><input type="checkbox" data-c="floors"> Floor plates every storey, inside the walls</label>
     ${slider('H', 'Storey height', 3, 6.2, 0.05, 'm')}
     ${slider('soft', 'Soften the voxel steps', 0, 3, 1, '')}
+    <h2 class="eyebrow" style="margin-top:16px">The interior</h2>
+    <p class="hint">Planned from the merged volume, storey by storey, in the hollow and interior views.</p>
+    <label class="chk"><input type="checkbox" data-c="voids"> Double-height voids and one atrium through the full height</label>
+    <label class="chk"><input type="checkbox" data-c="stairs"> Stairs between every pair of floors</label>
+    <label class="chk"><input type="checkbox" data-c="lifts"> Glass lifts</label>
+    <label class="chk"><input type="checkbox" data-c="partitions"> Rooms and doors — glass in workspaces, solid in hybrids</label>
+    <label class="chk"><input type="checkbox" data-c="windows"> Ribbon windows in the walls</label>
     <div class="xp-row rz-res"><span class="hint">Detail</span><button type="button" class="btn quiet" data-res="1">1 m</button><button type="button" class="btn quiet" data-res="2">0.5 m</button></div>
     <h2 class="eyebrow" style="margin-top:16px">Seeing inside</h2>
     ${slider('opacity', 'Shell opacity', 0.05, 1, 0.05, '')}
@@ -147,6 +176,11 @@ const HTML = `
     ${slider('cutZ', 'Section · from the street', 0, 100, 1, '%')}
     ${slider('cutX', 'Section · from the north', 0, 100, 1, '%')}
     <div class="xp-row"><button type="button" class="btn quiet" data-v="reset">Reset all</button><button type="button" class="btn quiet" data-v="glb">Model · GLB</button><button type="button" class="btn quiet" data-v="obj">Model · OBJ</button><button type="button" class="btn quiet" data-v="png">Picture · PNG</button></div>
+    <h2 class="eyebrow" style="margin-top:16px">Export for Blender · PLY</h2>
+    <p class="hint">Every point carries what it is (element), its module, its storey and its use; the colour is set by the choice below. Z up, metres.</p>
+    <div class="xp-row rz-ply"><label class="hint">Colour by <select data-v="plyColor"><option value="element">element</option><option value="module">module</option><option value="level">storey</option><option value="use">use</option></select></label><label class="hint">Points / m² <select data-v="plyDensity"><option>4</option><option>8</option><option>16</option><option>32</option></select></label></div>
+    <div class="xp-row"><button type="button" class="btn" data-v="plyPoints">Point cloud · PLY</button><button type="button" class="btn quiet" data-v="plyMesh">Mesh · PLY</button></div>
+    <p class="hint" data-v="plyNote"></p>
   </aside>
   <div class="as-main">
     <p class="status" data-v="stats"></p>
@@ -158,7 +192,7 @@ const HTML = `
 function status(t) { if (R.stats) R.stats.textContent = t; }
 function report() {
   const b = B.building, st = B.stats || {}, nP = neighbours(b.mods, b.cols).length, nO = Object.keys(S.overrides).length;
-  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
+  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
@@ -166,8 +200,10 @@ function syncControls() {
   $$('[data-c]', R.root).forEach(x => { x.checked = !!S[x.dataset.c]; });
   $$('[data-res]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.res === S.res));
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
-  R.modeNote.textContent = hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The merged modules as solid, opaque volumes — how the building looks from outside.';
-  R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = !hollow(); R.root.querySelector('[data-s=H]').disabled = !hollow() || !S.floors;
+  R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The merged modules as solid, opaque volumes — how the building looks from outside.';
+  for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors; R.root.querySelector('[data-c=windows]').disabled = S.view !== 'hollow';
+  R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
+  R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = !hollow() || !S.floors;
 }
 function renderPairs() {
   const b = B.building; if (!b) { R.pairs.innerHTML = ''; R.pair.innerHTML = ''; return; }
@@ -191,15 +227,14 @@ function setPair(v) {
 function pick(x, y) {
   const { camera, canvas, building, raycaster } = B.three, r = canvas.getBoundingClientRect();
   raycaster.setFromCamera(new THREE.Vector2(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1), camera);
-  const hits = raycaster.intersectObjects(building.children, false).filter(h => {
+  const hits = raycaster.intersectObjects(building.children.filter(o => o.visible && o.geometry.userData.labels), false).filter(h => {
     const p = h.point; return B.three.planes.every(pl => pl.distanceToPoint(p) >= 0);    // not in the cut-away part
   });
   if (!hits.length) return -1;
   const h = hits[0], L = h.object.geometry.userData.labels; return L[h.face.a];
 }
 function setView(name) {
-  const { camera, controls, building } = B.three, bb = new THREE.Box3();
-  building.children.forEach(o => bb.expandByObject(o));
+  const { camera, controls } = B.three, bb = B.box ? B.box.clone() : new THREE.Box3();
   if (bb.isEmpty()) return;
   const c = bb.getCenter(new THREE.Vector3()), size = bb.getSize(new THREE.Vector3()), span = Math.max(size.x, size.z, size.y * 1.5), d = span * 1.3 + 50;
   const v = {
@@ -228,11 +263,36 @@ function initThree(canvas) {
   const planes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6), new THREE.Plane(new THREE.Vector3(0, 0, -1), 1e6), new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6)];
   const SHELL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, clippingPlanes: planes, clipShadows: true, transparent: true, opacity: 0.35, depthWrite: false });
   const FLOOR = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, clippingPlanes: planes, clipShadows: true });
-  const building = new THREE.Group(); scene.add(building);
-  B.three = { renderer, scene, camera, controls, building, canvas, planes, SHELL, FLOOR, raycaster: new THREE.Raycaster() };
+  const part = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, clippingPlanes: planes, clipShadows: true, ...extra });
+  const PARTS = { stair: part(0xc62828, { roughness: 0.6 }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(0xd8d2c8),
+    glass: part(0xa9cfdc, { transparent: true, opacity: 0.28, depthWrite: false, roughness: 0.1, metalness: 0.1, side: THREE.DoubleSide }) };
+  const building = new THREE.Group(), interior = new THREE.Group(); scene.add(building, interior);
+  B.three = { renderer, scene, camera, controls, building, interior, canvas, planes, SHELL, FLOOR, PARTS, raycaster: new THREE.Raycaster() };
   const resize = () => { const w = canvas.clientWidth || 800, h = canvas.clientHeight || 500; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
   resize(); window.addEventListener('resize', resize);
   (function loop() { requestAnimationFrame(loop); if (canvas.isConnected && !R.root.closest('.tab')?.hidden) { controls.update(); renderer.render(scene, camera); } })();
+}
+/* Everything drawn, as surfaces in world space with what each part is → toPLY. */
+function exportPLY(mode) {
+  const b = B.building; if (!b || !B.three) return;
+  const surfaces = [];
+  for (const m of B.three.building.children) {
+    const g = m.geometry, L = g.userData.labels;
+    surfaces.push({ pos: g.getAttribute('position').array, index: g.index.array, element: g.userData.element, modOf: v => L[v] });
+  }
+  const box = new THREE.BoxGeometry(1, 1, 1), bp = box.getAttribute('position'), bi = box.index.array, M = new THREE.Matrix4(), v = new THREE.Vector3();
+  B.three.interior.traverse(o => {
+    if (!o.isInstancedMesh) return; const n = o.count, nv = bp.count, pos = new Float32Array(n * nv * 3), index = new Uint32Array(n * bi.length), mod = new Int16Array(n * nv);
+    for (let k = 0; k < n; k++) { o.getMatrixAt(k, M); for (let j = 0; j < nv; j++) { v.fromBufferAttribute(bp, j).applyMatrix4(M); pos.set([v.x, v.y, v.z], (k * nv + j) * 3); mod[k * nv + j] = o.userData.items[k].i; } for (let j = 0; j < bi.length; j++) index[k * bi.length + j] = k * nv + bi[j]; }
+    surfaces.push({ pos, index, element: o.userData.element, modOf: q => mod[q] });
+  });
+  const yBase = b.PODIUM_V * b.LAT, levelOf = y => Math.floor((y - yBase + 0.05) / S.H);
+  R.plyNote.textContent = 'Writing the PLY…';
+  setTimeout(() => {
+    const out = toPLY(surfaces, { mode, density: S.plyDensity, colorBy: S.plyColor, mods: b.mods, levelOf });
+    download(out.blob, `ProtoSpace-ValveHQ-${S.view === 'interior' ? 'interior' : 'building'}-${mode === 'points' ? 'pointcloud' : 'mesh'}.ply`);
+    R.plyNote.textContent = mode === 'points' ? `${out.count.toLocaleString()} points · ${(out.blob.size / 1e6).toFixed(1)} MB.` : `${out.count.toLocaleString()} vertices · ${out.faces.toLocaleString()} faces · ${(out.blob.size / 1e6).toFixed(1)} MB.`;
+  }, 30);
 }
 function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
 
@@ -252,6 +312,10 @@ export function mount(root, { getBuilding }) {
   R.reset.addEventListener('click', () => { Object.assign(S, { ...DEF, overrides: {} }); B.sel = []; syncControls(); save(); renderPairs(); schedule(0, 0); });
   R.glb.addEventListener('click', () => new GLTFExporter().parse(B.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ-rationalized.glb'), err => console.error(err), { binary: true }));
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(B.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ-rationalized.obj'));
+  R.plyColor.addEventListener('change', () => { S.plyColor = R.plyColor.value; save(); });
+  R.plyDensity.addEventListener('change', () => { S.plyDensity = +R.plyDensity.value; save(); });
+  R.plyPoints.addEventListener('click', () => exportPLY('points'));
+  R.plyMesh.addEventListener('click', () => exportPLY('mesh'));
   R.png.addEventListener('click', () => { const { renderer, scene, camera } = B.three; renderer.render(scene, camera); renderer.domElement.toBlob(b => download(b, 'ProtoSpace-ValveHQ-rationalized.png')); });
   // the pair card and the list
   R.pairs.addEventListener('click', e => { const r = e.target.closest('[data-pi]'); if (!r) return; B.sel = [+r.dataset.pi, +r.dataset.pj]; renderPairs(); paint(); });

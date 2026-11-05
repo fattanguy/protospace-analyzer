@@ -498,7 +498,8 @@
 .rz-slider { margin: 10px 0 4px; } .rz-slider label { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink2); margin-bottom: 4px; } .rz-slider label b { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
 .rz-slider .hint { margin: 4px 0 0; } .rz-slider input:disabled { opacity: .4; }
 .rz-res { align-items: center; gap: 6px; } .rz-res .btn.on, .rz-mode .btn.on { border-color: var(--accent); color: var(--ink); background: var(--panel); }
-.rz-mode { gap: 6px; } .rz-mode .btn { flex: 1; }
+.rz-mode { gap: 6px; flex-wrap: wrap; } .rz-mode .btn { flex: 1 1 30%; padding-left: 6px; padding-right: 6px; }
+.rz-ply { gap: 10px; flex-wrap: wrap; } .rz-ply label { display: flex; gap: 6px; align-items: center; margin: 0; } .rz-ply select { font: inherit; background: var(--bg); color: var(--ink); border: 1px solid var(--rule); padding: 2px 4px; }
 .rz-card { border: 1px solid var(--rule); padding: 10px 12px; margin: 10px 0 4px; display: grid; gap: 4px; } .rz-card.on { border-color: var(--accent); } .rz-card b { font-weight: 500; color: var(--ink); }
 .rz-pairs { display: grid; gap: 4px; max-height: 260px; overflow: auto; scrollbar-width: thin; }
 .rz-prow { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; text-align: left; background: none; border: 1px solid var(--rule); color: var(--ink2); padding: 6px 9px; font: inherit; font-size: 12px; cursor: pointer; }
