@@ -17,8 +17,9 @@ import { taubin } from './fuse.js';
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, hollow: true, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, view: 'solid', floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
+const hollow = () => S.view === 'hollow';                                          // 'solid': the modules as they look, opaque · 'hollow': walls, floors, see-through
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
 let R = {};
 
@@ -73,7 +74,7 @@ function makeMeshes() {
   };
   const labelsOf = (pos, fine) => { const L = new Int16Array(pos.length / 3); for (let v = 0; v < L.length; v++) { const x = Math.round(pos[v * 3] / fine), y = Math.round(pos[v * 3 + 1] / fine), z = Math.round(pos[v * 3 + 2] / fine); L[v] = U.lab[Math.min(U.nx - 1, x) + U.nx * (Math.min(U.ny - 1, y) + U.ny * Math.min(U.nz - 1, z))] - 1; } return L; };
   const mesh = (kind, mat) => {
-    const step = b.LAT / s, D = detailField(U, s, kind, { t: S.hollow ? Math.max(S.t, 1.1 * step) : 0, tf: Math.max(S.tf, 1.1 * step), H: S.H, yBase: b.PODIUM_V * b.LAT, yOf });   // nothing thinner than the sampling step, or it falls between samples
+    const step = b.LAT / s, D = detailField(U, s, kind, { t: hollow() ? Math.max(S.t, 1.1 * step) : 0, tf: Math.max(S.tf, 1.1 * step), H: S.H, yBase: b.PODIUM_V * b.LAT, yOf });   // nothing thinner than the sampling step, or it falls between samples
     const { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
@@ -87,7 +88,7 @@ function makeMeshes() {
     B.three.building.add(m); return { m, cells: D.F.reduce((n, v) => n + (v < 0 ? 1 : 0), 0) };
   };
   const sh = mesh('shell', B.three.SHELL);
-  const fl = S.hollow && S.floors ? mesh('floors', B.three.FLOOR) : null;
+  const fl = hollow() && S.floors ? mesh('floors', B.three.FLOOR) : null;
   const cell = Math.pow(b.LAT / s, 3);
   B.stats = { tris: [sh, fl].reduce((n, x) => n + (x ? x.m.geometry.index.count / 3 : 0), 0), floorArea: fl ? fl.cells * cell / Math.max(S.tf, 1.1 * b.LAT / s) : 0, wallVol: sh ? sh.cells * cell : 0 };
   B.box = new THREE.Box3(); B.three.building.children.forEach(o => { o.geometry.computeBoundingBox(); B.box.union(o.geometry.boundingBox); });
@@ -109,7 +110,7 @@ function paint() {
   }
 }
 function applyLook() {
-  const { SHELL } = B.three, o = S.opacity;
+  const { SHELL } = B.three, o = hollow() ? S.opacity : 1;
   SHELL.opacity = o; SHELL.transparent = o < 0.999; SHELL.depthWrite = o >= 0.999; SHELL.needsUpdate = true;
 }
 function applyCuts() {
@@ -125,14 +126,16 @@ const slider = (key, label, min, max, step, unit, hint = '') => `<div class="xp-
 const HTML = `
 <div class="as rz">
   <aside class="xp-controls as-controls" aria-label="Rationalize controls">
-    <h2 class="eyebrow">Merging</h2>
+    <h2 class="eyebrow">Show the modules</h2>
+    <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button></div>
+    <p class="hint" data-v="modeNote"></p>
+    <h2 class="eyebrow" style="margin-top:16px">Merging</h2>
     ${slider('k', 'Merge · every pair', 0, KMAX, 0.25, 'm', 'How far the modules reach for each other: 0 keeps them apart across their 1 m seams; a few metres grows a fillet between neighbours until they read as one mass, and their rooms open into each other.')}
     <div class="rz-pair" data-v="pair"></div>
     <h2 class="eyebrow" style="margin-top:16px">Pairs</h2>
     <p class="hint">Click a module in the view, then a second one, to set how much those two merge. Or pick a pair here.</p>
     <div class="rz-pairs" data-v="pairs"></div>
     <h2 class="eyebrow" style="margin-top:16px">The volume</h2>
-    <label class="chk"><input type="checkbox" data-c="hollow"> Hollow — walls inside the surface</label>
     ${slider('t', 'Wall thickness', 0.3, 2.5, 0.05, 'm')}
     <label class="chk"><input type="checkbox" data-c="floors"> Floor plates every storey, inside the walls</label>
     ${slider('H', 'Storey height', 3, 6.2, 0.05, 'm')}
@@ -155,14 +158,16 @@ const HTML = `
 function status(t) { if (R.stats) R.stats.textContent = t; }
 function report() {
   const b = B.building, st = B.stats || {}, nP = neighbours(b.mods, b.cols).length, nO = Object.keys(S.overrides).length;
-  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (S.hollow && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
+  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
   $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
   $$('[data-c]', R.root).forEach(x => { x.checked = !!S[x.dataset.c]; });
   $$('[data-res]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.res === S.res));
-  R.root.querySelector('[data-s=t]').disabled = !S.hollow; R.root.querySelector('[data-c=floors]').disabled = !S.hollow; R.root.querySelector('[data-s=H]').disabled = !S.hollow || !S.floors;
+  $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
+  R.modeNote.textContent = hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The merged modules as solid, opaque volumes — how the building looks from outside.';
+  R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = !hollow(); R.root.querySelector('[data-s=H]').disabled = !hollow() || !S.floors;
 }
 function renderPairs() {
   const b = B.building; if (!b) { R.pairs.innerHTML = ''; R.pair.innerHTML = ''; return; }
@@ -242,6 +247,7 @@ export function mount(root, { getBuilding }) {
   }));
   $$('[data-c]', root).forEach(x => x.addEventListener('change', () => { S[x.dataset.c] = x.checked; syncControls(); save(); schedule(2, 0); }));
   $$('[data-res]', root).forEach(x => x.addEventListener('click', () => { S.res = +x.dataset.res; syncControls(); save(); schedule(2, 0); }));
+  $$('[data-mode]', root).forEach(x => x.addEventListener('click', () => { if (S.view === x.dataset.mode) return; S.view = x.dataset.mode; syncControls(); save(); applyLook(); schedule(2, 0); }));
   $$('[data-view]', root).forEach(x => x.addEventListener('click', () => setView(x.dataset.view)));
   R.reset.addEventListener('click', () => { Object.assign(S, { ...DEF, overrides: {} }); B.sel = []; syncControls(); save(); renderPairs(); schedule(0, 0); });
   R.glb.addEventListener('click', () => new GLTFExporter().parse(B.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ-rationalized.glb'), err => console.error(err), { binary: true }));
