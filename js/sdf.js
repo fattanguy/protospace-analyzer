@@ -123,7 +123,11 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
           if (winY < 0.6 && w < 0.6) {                                                   // near a wall, in the window band: is the wall upright here?
             const cx = Math.min(nx - 2, Math.max(1, Math.round(xc))), cy = Math.min(ny - 2, Math.max(1, Math.round(yc))), cz = Math.min(U.nz - 2, Math.max(1, Math.round(zc))), c = cx + nx * (cy + ny * cz);
             const gx = f[c + 1] - f[c - 1], gy = f[c + nx] - f[c - nx], gz = f[c + sxy] - f[c - sxy];
-            if (gy * gy < 0.2 * (gx * gx + gy * gy + gz * gz)) w = Math.max(w, -winY);
+            if (gy * gy < 0.2 * (gx * gx + gy * gy + gz * gz)) {
+              const P = windows.pier || 6, ph = (windows.pierW || 1.5) / 2, along = (Math.abs(gx) > Math.abs(gz) ? U.z0 + zc : U.x0 + xc) * (windows.LAT || 1);   // along the wall
+              let q = (along % P + P) % P; if (q > P / 2) q -= P;                       // to the nearest pier's centre
+              w = Math.max(w, -Math.max(winY, ph - Math.abs(q)));                       // a window, except where a pier stands
+            }
           }
           out[o] = w;
         } else {
@@ -174,4 +178,33 @@ export function netsField(F, NX, NY, NZ) {
     }
   }
   return { pos: new Float32Array(pos), index: idx.length > 65535 * 3 || pos.length / 3 > 65535 ? new Uint32Array(idx) : new Uint16Array(idx) };
+}
+
+/* A floor plate's outline at one level, as a 2-D field over the union's x–z extent `s` times finer: negative where the
+   plate is — inside the body at the plate's mid-height (out to the outer face), under a room (1.5 m above it must be
+   inside the walls of thickness t) and outside the level's openings (holeAt, metres). yMid, yAbove in grid y. */
+export function plateField(U, s, { yMid, yAbove, t, holeAt = null }) {
+  const FX = (U.nx - 1) * s + 1, FZ = (U.nz - 1) * s + 1, out = new Float32Array(FX * FZ), { nx, ny, nz, f } = U, sxy = nx * ny;
+  const at = (xc, yc, zc) => {
+    const x0 = Math.min(nx - 2, Math.floor(xc)), y0 = Math.min(ny - 2, Math.max(0, Math.floor(yc))), z0 = Math.min(nz - 2, Math.floor(zc)), tx = xc - x0, ty = Math.min(1, Math.max(0, yc - y0)), tz = zc - z0, b = x0 + nx * (y0 + ny * z0);
+    const c00 = f[b] + (f[b + 1] - f[b]) * tx, c10 = f[b + nx] + (f[b + nx + 1] - f[b + nx]) * tx, c01 = f[b + sxy] + (f[b + sxy + 1] - f[b + sxy]) * tx, c11 = f[b + sxy + nx] + (f[b + sxy + nx + 1] - f[b + sxy + nx]) * tx;
+    const c0 = c00 + (c10 - c00) * ty, c1 = c01 + (c11 - c01) * ty; return c0 + (c1 - c0) * tz;
+  };
+  const ym = yMid - U.y0, ya = yAbove - U.y0;
+  for (let z = 0, o = 0; z < FZ; z++) for (let x = 0; x < FX; x++, o++) {
+    const xc = x / s, zc = z / s;
+    let w = Math.max(at(xc, ym, zc), at(xc, ya, zc) + t);
+    if (holeAt && w < 1) w = Math.max(w, -holeAt(U.x0 + xc, U.z0 + zc));
+    out[o] = w;
+  }
+  return { F: out, FX, FZ };
+}
+/* A plate of exact thickness from a 2-D outline field: surface nets over three layers whose crossings in y sit exactly
+   at 0.5 and 1.5, so top and bottom are flat and parallel; → { pos (x, z in fine units; y 0 = bottom, 1 = top), index } */
+export function extrudeOutline(P) {
+  const { F, FX, FZ } = P, G = new Float32Array(FX * 3 * FZ);
+  for (let z = 0; z < FZ; z++) for (let y = 0; y < 3; y++) for (let x = 0; x < FX; x++) G[x + FX * (y + 3 * z)] = Math.max(F[x + FX * z] * 4, Math.abs(y - 1) - 0.5);
+  const r = netsField(G, FX, 3, FZ);
+  for (let i = 1; i < r.pos.length; i += 3) r.pos[i] = r.pos[i] < 1 ? 0 : 1;
+  return r;
 }

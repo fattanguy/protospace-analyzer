@@ -16,6 +16,7 @@
    to the field (holeAt) so the plates are really cut, and the parts are built as instanced boxes. toPLY writes the
    lot as a point cloud or a mesh, every point carrying what it is (element), which module, which storey and which use. */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 export const ELEMENTS = ['wall', 'floor', 'stair', 'lift', 'glass partition', 'solid partition', 'balustrade', 'metal'];
 export const ELEMENT_COLOR = ['#e9e5de', '#a79f93', '#c62828', '#3a3a3a', '#9fc3d1', '#d8d2c8', '#b9d3dc', '#6e6e6e'];
@@ -187,21 +188,36 @@ export function buildInterior(plan, { LAT, gridX, gridZ, mats, H, tf, t }) {
     box(7, mats.metal, (ax + bx) / 2, y + 1.12, (az + bz) / 2, len, 0.05, 0.07, q, i, n);
   };
   for (const v of plan.atria) for (const n of v.cut) { const seg = Math.max(18, Math.round(v.R * 5)); for (let k = 0; k < seg; k++) { const a0 = (k / seg) * Math.PI * 2, a1 = ((k + 1) / seg) * Math.PI * 2; rail(n, v.i, v.x + Math.cos(a0) * v.r, v.z + Math.sin(a0) * v.r, v.x + Math.cos(a1) * v.r, v.z + Math.sin(a1) * v.r); } }
-  // stairs: red treads, dark stringers, glass and a handrail up both sides
+  // stairs: the floor folding up into the next one — one solid flight, its soffit as thick as the plate, from the floor
+  // below to the edge of the stairwell in the floor above — with glass and a handrail up both sides
+  const flights = [], flightMods = [];
   for (const s of plan.stairs) {
     const y0 = levels[s.n], along = (d, w) => [s.sx + (s.dx * d - s.dz * w) * m2g, s.sz + (s.dz * d + s.dx * w) * m2g];
     const yaw = -Math.atan2(-s.dz, s.dx), qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);   // the run's direction in the world (z is flipped)
-    for (let k = 0; k < risers - 1; k++) { const [gx, gz] = along((k + 0.5) * going, 0), [wx, wz] = W(gx, gz); box(2, mats.stair, wx, y0 + (k + 1) * rise - 0.06, wz, going + 0.02, 0.12, plan.W, qy, s.i, s.n); }
+    const end = runM + 0.4, shape = new THREE.Shape();                              // the profile in (along the run, up): steps on top, a straight soffit below
+    shape.moveTo(0, 0);
+    for (let k = 0; k < risers - 1; k++) { shape.lineTo(k * going, (k + 1) * rise); shape.lineTo((k + 1) * going, (k + 1) * rise); }
+    shape.lineTo((risers - 1) * going, H); shape.lineTo(end, H); shape.lineTo(end, H - tf); shape.lineTo(0, 0);
+    const g = new THREE.ExtrudeGeometry(shape, { depth: plan.W, bevelEnabled: false, steps: 1, curveSegments: 1 });
+    g.translate(0, 0, -plan.W / 2);
+    const [ox, oz] = W(s.sx, s.sz), es = new THREE.Vector3(s.dx, 0, -s.dz).normalize(), ey = new THREE.Vector3(0, 1, 0), ew = es.clone().cross(ey);
+    g.applyMatrix4(new THREE.Matrix4().makeBasis(es, ey, ew).setPosition(ox, y0, oz));
+    flights.push(g.index ? g.toNonIndexed() : g); flightMods.push(s.i);
     const slope = Math.atan2(H, runM), len = Math.hypot(H, runM), qs = qy.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), slope));
-    for (const w of [-plan.W / 2 - 0.04, plan.W / 2 + 0.04]) {
+    for (const w of [-plan.W / 2 - 0.03, plan.W / 2 + 0.03]) {
       const [gx, gz] = along(runM / 2, w), [wx, wz] = W(gx, gz);
-      box(7, mats.dark, wx, y0 + H / 2 - 0.1, wz, len, 0.36, 0.06, qs, s.i, s.n);                      // stringer
       box(6, mats.glass, wx, y0 + H / 2 + 0.55, wz, len, 0.95, 0.025, qs, s.i, s.n);                   // glass up the flight
       box(7, mats.metal, wx, y0 + H / 2 + 1.05, wz, len, 0.05, 0.06, qs, s.i, s.n);                    // handrail
     }
     // the stairwell in the plate above: rails on both long sides and the low end
-    const n1 = s.n + 1, [a1, b1] = along(0, -plan.W / 2 - 0.25), [a2, b2] = along(runM, -plan.W / 2 - 0.25), [a3, b3] = along(runM, plan.W / 2 + 0.25), [a4, b4] = along(0, plan.W / 2 + 0.25);
+    const n1 = s.n + 1, [a1, b1] = along(-0.4, -plan.W / 2 - 0.25), [a2, b2] = along(runM + 0.4, -plan.W / 2 - 0.25), [a3, b3] = along(runM + 0.4, plan.W / 2 + 0.25), [a4, b4] = along(-0.4, plan.W / 2 + 0.25);
     if (n1 < levels.length) { rail(n1, s.i, a1, b1, a2, b2); rail(n1, s.i, a4, b4, a3, b3); rail(n1, s.i, a1, b1, a4, b4); }
+  }
+  if (flights.length) {
+    const mods = []; flights.forEach((g, k) => { for (let v = 0; v < g.getAttribute('position').count; v++) mods.push(flightMods[k]); });
+    let g = mergeGeometries(flights.map(x => { const y = new THREE.BufferGeometry(); y.setAttribute('position', x.getAttribute('position')); return y; }));
+    const n = g.getAttribute('position').count, idx = new Uint32Array(n); for (let k = 0; k < n; k++) idx[k] = k; g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mats.stair); m.castShadow = m.receiveShadow = true; m.name = 'stairs'; m.userData = { element: 2, mods: Int16Array.from(mods) }; group.add(m);
   }
   // lifts: a glass shaft with dark corner posts and a cab, through the storeys they serve
   for (const l of plan.lifts) {

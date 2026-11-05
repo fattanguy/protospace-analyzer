@@ -11,14 +11,15 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
-import { moduleField, unionField, detailField, netsField } from './sdf.js';
+import { moduleField, unionField, detailField, netsField, plateField, extrudeOutline } from './sdf.js';
 import { taubin } from './fuse.js';
 import { planInterior, buildInterior, toPLY, ELEMENTS } from './interior.js';
 
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const KMAX = 20;                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const KMAX = 20;
+const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
+const DEF = { k: 3, t: 0.8, tf: 0.4, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => S.view !== 'solid';                                          // 'solid': the modules as they look, opaque · 'hollow': walls, floors, see-through
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
@@ -74,28 +75,52 @@ function makeMeshes() {
     for (let i = 0; i < pos.length; i += 3) { const gx = U.x0 + pos[i] / fine, gy = U.y0 + pos[i + 1] / fine, gz = U.z0 + pos[i + 2] / fine; pos[i] = b.gridX(gx); pos[i + 1] = b.gridY(gy); pos[i + 2] = b.gridZ(gz); }
   };
   const labelsOf = (pos, fine) => { const L = new Int16Array(pos.length / 3); for (let v = 0; v < L.length; v++) { const x = Math.round(pos[v * 3] / fine), y = Math.round(pos[v * 3 + 1] / fine), z = Math.round(pos[v * 3 + 2] / fine); L[v] = U.lab[Math.min(U.nx - 1, x) + U.nx * (Math.min(U.ny - 1, y) + U.ny * Math.min(U.nz - 1, z))] - 1; } return L; };
-  const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = Math.max(S.tf, 1.1 * step), yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
+  const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = S.tf, yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
   B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
   const mesh = (kind, mat) => {
-    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && hollow() && S.windows ? { sill: 1.0, head: 1.0 } : null });
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && hollow() && S.windows ? { sill: 1.0, head: 1.0, pier: 6, pierW: 1.5, LAT: b.LAT } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
     taubin(pos, index, kind === 'shell' ? 3 : 1);
     toWorld(pos, s);
-    if (kind === 'floors') index = dropSmall(pos, index, 30);                        // no scraps of floor in the corners of curved rooms
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(index, 1));
     g.computeVertexNormals();
     const col = new Float32Array(pos.length); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    g.userData.labels = labels; g.userData.base = new THREE.Color(kind === 'shell' ? 0xe9e5de : 0xa79f93); g.userData.element = kind === 'shell' ? 0 : 1;
+    g.userData.labels = labels; g.userData.base = new THREE.Color(BODY); g.userData.element = 0;
     const m = new THREE.Mesh(g, mat); m.name = kind === 'shell' ? 'Valve HQ · shell' : 'Valve HQ · floor plates'; m.castShadow = m.receiveShadow = true;
     B.three.building.add(m); let cells = 0; for (let i = 0; i < D.F.length; i++) if (D.F[i] < 0) cells++; return { m, cells };
   };
+  const plates = () => {
+    const P = [], I = [], Lb = []; let cells = 0;
+    B.plan.levels.forEach((y, n) => {
+      const O = plateField(U, s, { yMid: (y + tf / 2) / b.LAT - 0.5, yAbove: (y + tf + 1.5) / b.LAT - 0.5, t, holeAt: (gx, gz) => B.plan.holeAt(n, gx, gz) });
+      for (let i = 0; i < O.F.length; i++) if (O.F[i] < 0) cells++;
+      let { pos, index } = extrudeOutline(O); if (!index.length) return;
+      const base = P.length / 3, ys = new Uint8Array(pos.length / 3); for (let v = 0; v < ys.length; v++) ys[v] = pos[v * 3 + 1];
+      taubin(pos, index, 3);                                                          // smooth the outline only: top and bottom stay flat
+      for (let v = 0; v < ys.length; v++) {
+        const gx = U.x0 + pos[v * 3] / s, gz = U.z0 + pos[v * 3 + 2] / s;
+        P.push(b.gridX(gx), y + ys[v] * tf, b.gridZ(gz));
+        const lx = Math.min(U.nx - 1, Math.max(0, Math.round(gx - U.x0))), ly = Math.min(U.ny - 1, Math.max(0, Math.round((y + tf / 2) / b.LAT - 0.5 - U.y0))), lz = Math.min(U.nz - 1, Math.max(0, Math.round(gz - U.z0)));
+        Lb.push(U.lab[lx + U.nx * (ly + U.ny * lz)] - 1);
+      }
+      for (let k = 0; k < index.length; k++) I.push(base + index[k]);
+    });
+    if (!I.length) return null;
+    const pos = new Float32Array(P), index = dropSmall(pos, P.length / 3 > 65535 ? new Uint32Array(I) : new Uint16Array(I), 30);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(index, 1)); g.computeVertexNormals();
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(pos.length), 3));
+    g.userData.labels = Int16Array.from(Lb); g.userData.base = new THREE.Color(BODY); g.userData.element = 1;
+    const m = new THREE.Mesh(g, B.three.FLOOR); m.name = 'Valve HQ · floor plates'; m.castShadow = m.receiveShadow = true; B.three.building.add(m);
+    let area = 0; const nm = g.getAttribute('normal'); for (let k = 0; k < index.length; k += 3) { const a = index[k] * 3, c = index[k + 1] * 3, d = index[k + 2] * 3; if (nm.getY(index[k]) < 0.9) continue; area += Math.abs((pos[c] - pos[a]) * (pos[d + 2] - pos[a + 2]) - (pos[d] - pos[a]) * (pos[c + 2] - pos[a + 2])) / 2; }
+    return { m, cells: area };                                                        // m² of plate: the area of the plates' tops
+  };
   const sh = S.view !== 'interior' ? mesh('shell', B.three.SHELL) : null;            // "Interior only" draws no shell at all
-  const fl = hollow() && S.floors ? mesh('floors', B.three.FLOOR) : null;
+  const fl = B.plan ? plates() : null;
   if (B.plan) B.three.interior.add(buildInterior(B.plan, { LAT: b.LAT, gridX: b.gridX, gridZ: b.gridZ, mats: B.three.PARTS, H: S.H, tf, t }));
   const cell = Math.pow(b.LAT / s, 3), pl = B.plan;
-  B.stats = { tris: [sh, fl].reduce((n, x) => n + (x ? x.m.geometry.index.count / 3 : 0), 0), floorArea: fl ? fl.cells * cell / tf : 0, wallVol: sh ? sh.cells * cell : 0,
+  B.stats = { tris: [sh, fl].reduce((n, x) => n + (x ? x.m.geometry.index.count / 3 : 0), 0), floorArea: fl ? fl.cells : 0, wallVol: sh ? sh.cells * cell : 0,
     voids: pl ? pl.atria.reduce((n, v) => n + v.cut.length, 0) : 0, atrium: pl ? pl.atria.some(v => v.main && v.cut.length > 1) : false, stairs: pl ? pl.stairs.length : 0, lifts: pl ? pl.lifts.length : 0, walls: pl ? pl.walls.length : 0 };
   B.box = new THREE.Box3(); [B.three.building, B.three.interior].forEach(g => g.traverse(o => { if (o.isMesh) B.box.expandByObject(o); }));
   paint(); applyCuts(); applyLook();
@@ -161,6 +186,7 @@ const HTML = `
     ${slider('t', 'Wall thickness', 0.3, 2.5, 0.05, 'm')}
     <label class="chk"><input type="checkbox" data-c="floors"> Floor plates every storey, inside the walls</label>
     ${slider('H', 'Storey height', 3, 6.2, 0.05, 'm')}
+    ${slider('tf', 'Floor thickness', 0.2, 1.2, 0.05, 'm', 'Every plate is exactly this thick, edge to edge; the stairs fold out of it at the same thickness.')}
     ${slider('soft', 'Soften the voxel steps', 0, 3, 1, '')}
     <h2 class="eyebrow" style="margin-top:16px">The interior</h2>
     <p class="hint">Planned from the merged volume, storey by storey, in the hollow and interior views.</p>
@@ -168,7 +194,7 @@ const HTML = `
     <label class="chk"><input type="checkbox" data-c="stairs"> Stairs between every pair of floors</label>
     <label class="chk"><input type="checkbox" data-c="lifts"> Glass lifts</label>
     <label class="chk"><input type="checkbox" data-c="partitions"> Rooms and doors — glass in workspaces, solid in hybrids</label>
-    <label class="chk"><input type="checkbox" data-c="windows"> Ribbon windows in the walls</label>
+    <label class="chk"><input type="checkbox" data-c="windows"> Windows in the walls, between piers every 6 m</label>
     <div class="xp-row rz-res"><span class="hint">Detail</span><button type="button" class="btn quiet" data-res="1">1 m</button><button type="button" class="btn quiet" data-res="2">0.5 m</button></div>
     <h2 class="eyebrow" style="margin-top:16px">Seeing inside</h2>
     ${slider('opacity', 'Shell opacity', 0.05, 1, 0.05, '')}
@@ -203,7 +229,7 @@ function syncControls() {
   R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The merged modules as solid, opaque volumes — how the building looks from outside.';
   for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors; R.root.querySelector('[data-c=windows]').disabled = S.view !== 'hollow';
   R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
-  R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = !hollow() || !S.floors;
+  R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = R.root.querySelector('[data-s=tf]').disabled = !hollow() || !S.floors;
 }
 function renderPairs() {
   const b = B.building; if (!b) { R.pairs.innerHTML = ''; R.pair.innerHTML = ''; return; }
@@ -254,7 +280,7 @@ function initThree(canvas) {
   const controls = new OrbitControls(camera, canvas); controls.target.set(125, 18, -40); controls.enableDamping = true; controls.dampingFactor = 0.08;
   scene.add(new THREE.HemisphereLight(0xffffff, 0x4a4a4a, 0.95));
   const sun = new THREE.DirectionalLight(0xffffff, 1.9); sun.position.set(-150, 220, 160); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-  const sc = sun.shadow.camera; sc.left = -220; sc.right = 220; sc.top = 220; sc.bottom = -220; sc.near = 10; sc.far = 800; sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.3; sun.target.position.set(125, 0, -50); scene.add(sun, sun.target);
+  const sc = sun.shadow.camera; sc.left = -220; sc.right = 220; sc.top = 220; sc.bottom = -220; sc.near = 10; sc.far = 800; sun.shadow.bias = -0.0018; sun.shadow.normalBias = 0.6; sun.target.position.set(125, 0, -50); scene.add(sun, sun.target);
   const fill = new THREE.DirectionalLight(0xffffff, 0.45); fill.position.set(200, 80, -200); scene.add(fill);
   const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, ...extra });
   const plane = (w, d, color, x, z, y = 0, extra = {}) => { const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(color, extra)); p.rotation.x = -Math.PI / 2; p.position.set(x, y, z); p.receiveShadow = true; scene.add(p); };
@@ -262,9 +288,9 @@ function initThree(canvas) {
   plane(60, 160, 0xb9b9b9, -30, -50, -0.05); plane(60, 160, 0xb9b9b9, 280, -50, -0.05);
   const planes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6), new THREE.Plane(new THREE.Vector3(0, 0, -1), 1e6), new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6)];
   const SHELL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, clippingPlanes: planes, clipShadows: true, transparent: true, opacity: 0.35, depthWrite: false });
-  const FLOOR = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide, clippingPlanes: planes, clipShadows: true });
+  const FLOOR = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, clippingPlanes: planes, clipShadows: true });
   const part = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, clippingPlanes: planes, clipShadows: true, ...extra });
-  const PARTS = { stair: part(0xc62828, { roughness: 0.6 }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(0xd8d2c8),
+  const PARTS = { stair: part(BODY, { roughness: 0.85, side: THREE.DoubleSide }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(BODY, { roughness: 0.85 }),
     glass: part(0xa9cfdc, { transparent: true, opacity: 0.28, depthWrite: false, roughness: 0.1, metalness: 0.1, side: THREE.DoubleSide }) };
   const building = new THREE.Group(), interior = new THREE.Group(); scene.add(building, interior);
   B.three = { renderer, scene, camera, controls, building, interior, canvas, planes, SHELL, FLOOR, PARTS, raycaster: new THREE.Raycaster() };
@@ -282,6 +308,7 @@ function exportPLY(mode) {
   }
   const box = new THREE.BoxGeometry(1, 1, 1), bp = box.getAttribute('position'), bi = box.index.array, M = new THREE.Matrix4(), v = new THREE.Vector3();
   B.three.interior.traverse(o => {
+    if (o.isMesh && !o.isInstancedMesh && o.userData.mods) { surfaces.push({ pos: o.geometry.getAttribute('position').array, index: o.geometry.index.array, element: o.userData.element, modOf: q => o.userData.mods[q] }); return; }
     if (!o.isInstancedMesh) return; const n = o.count, nv = bp.count, pos = new Float32Array(n * nv * 3), index = new Uint32Array(n * bi.length), mod = new Int16Array(n * nv);
     for (let k = 0; k < n; k++) { o.getMatrixAt(k, M); for (let j = 0; j < nv; j++) { v.fromBufferAttribute(bp, j).applyMatrix4(M); pos.set([v.x, v.y, v.z], (k * nv + j) * 3); mod[k * nv + j] = o.userData.items[k].i; } for (let j = 0; j < bi.length; j++) index[k * bi.length + j] = k * nv + bi[j]; }
     surfaces.push({ pos, index, element: o.userData.element, modOf: q => mod[q] });
@@ -300,7 +327,7 @@ export function mount(root, { getBuilding }) {
   root.innerHTML = HTML; R = { root }; $$('[data-v]', root).forEach(el => { R[el.dataset.v] = el; });
   initThree(R.canvas); syncControls();
   // sliders and switches: each one re-runs only the stage it changes
-  const STAGE = { k: 1, t: 2, H: 2, soft: 0 };
+  const STAGE = { k: 1, t: 2, H: 2, tf: 2, soft: 0 };
   $$('[data-s]', root).forEach(x => x.addEventListener('input', () => {
     const k = x.dataset.s; S[k] = +x.value; syncControls(); save();
     if (k === 'opacity') applyLook(); else if (/^cut/.test(k)) applyCuts(); else { if (k === 'k') renderPairs(); schedule(STAGE[k], 220); }
