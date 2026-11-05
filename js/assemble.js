@@ -331,7 +331,8 @@ function initThree(canvas) {
   (function loop() { requestAnimationFrame(loop); if (canvas.isConnected && !R.root.closest('.tab')?.hidden) { controls.update(); renderer.render(scene, camera); } })();
 }
 const MATS = {};
-function matFor(use) { if (!MATS[use]) { const c = new THREE.Color(0xe9e5de).lerp(new THREE.Color(USE[use] ? USE[use].c : '#888'), 0.22); MATS[use] = new THREE.MeshStandardMaterial({ color: c, roughness: 0.9, metalness: 0, side: THREE.DoubleSide }); } return MATS[use]; }
+const MODULE_COLOR = 0xe9e5de;                                                       // one colour for every module in 3D — the kinds are told apart on the board, the callouts and the palette, not the model
+function matFor(use) { if (!MATS[use]) { MATS[use] = new THREE.MeshStandardMaterial({ color: new THREE.Color(MODULE_COLOR), roughness: 0.9, metalness: 0, side: THREE.DoubleSide }); } return MATS[use]; }
 const SLAB = new THREE.MeshStandardMaterial({ color: 0xbdb7ae, roughness: 0.95, side: THREE.DoubleSide });
 const RED = new THREE.MeshStandardMaterial({ color: 0xc62828, roughness: 0.7 });
 const CORE = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.85 });
@@ -346,7 +347,7 @@ function placement(k, L, rot, geo) {
 }
 const FUSED = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, side: THREE.DoubleSide });
 const CORE_PID = 30000;                                                             // grid labels from here up are cores (the first the red stair), not modules
-function tintOf(use) { return '#' + new THREE.Color(0xece8e1).lerp(new THREE.Color(USE[use] ? USE[use].c : '#888'), 0.5).getHexString(); }
+function tintOf(use) { return '#' + new THREE.Color(MODULE_COLOR).getHexString(); }
 function clearBuilding() {
   const { building, labels } = A.three;
   for (const g of [building, labels]) while (g.children.length) { const o = g.children.pop(); o.traverse?.(c => { if (c.geometry && !c.userData.shared) c.geometry.dispose(); }); }
