@@ -185,14 +185,14 @@ function autoArrange(seed = Date.now() % 1000) {
   const hybrids = A.modules.filter(m => m.use === 'hybrid'), used = new Set();
   const kindsAt = (L, k) => { const out = { lobby: 0, office: 0, social: 0, hybrid: 0, som: 0 }; for (const j of neighboursOf(k)) if (A.boards[L][j]) out[A.boards[L][j].mod.use]++; if (L > 0 && A.boards[L - 1][k]) out[A.boards[L - 1][k].mod.use]++; if (L < 2 && A.boards[L + 1][k]) out[A.boards[L + 1][k].mod.use]++; return out; };
   const hasAccess = (L, k) => { const n = kindsAt(L, k); return n.social >= 2 || (n.social >= 1 && n.hybrid >= 1); };
-  const needy = () => { const w = new Set(); for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (!t) return; const cn = joinsAt(L, k, t.mod, t.rot); if ((cn.length && cn.some(x => !x.through)) || ((t.mod.use === 'office' || t.mod.use === 'hybrid') && !hasAccess(L, k))) w.add(`${L}:${k}`); }); return w; };
+  const needy = () => { const w = new Set(); for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => { if (!t) return; const cn = joinsAt(L, k, t.mod, t.rot); if ((cn.length && cn.some(x => !x.through)) || (t.mod.use === 'office' && !hasAccess(L, k))) w.add(`${L}:${k}`); }); return w; };
   for (let added = 0; added < 6 && hybrids.length; added++) {
     const need = needy(); if (!need.size) break;
     let best = null;
     for (let L = 0; L < 3; L++) for (let k = 0; k < SITE.cols * SITE.rows; k++) {
       if (A.boards[L][k] || (L > 0 && !A.boards[L - 1][k]) || viewsLost(L, k)) continue;
       const nbs = joinsAt(L, k, hybrids[0], 0); if (!nbs.some(x => need.has(`${x.L}:${x.k}`))) continue;
-      const completes = nbs.filter(x => { const t = A.boards[x.L][x.k]; return (t.mod.use === 'office' || t.mod.use === 'hybrid') && !hasAccess(x.L, x.k) && kindsAt(x.L, x.k).social >= 1; }).length;
+      const completes = nbs.filter(x => { const t = A.boards[x.L][x.k]; return t.mod.use === 'office' && !hasAccess(x.L, x.k) && kindsAt(x.L, x.k).social >= 1; }).length;
       for (const h of hybrids) { if (used.has(h.id)) continue; for (let rot = 0; rot < 4; rot++) {
         const cn = joinsAt(L, k, h, rot), face = sidesOf(h, rot).open;
         const sc = cn.reduce((acc, x) => acc + (x.through ? (need.has(`${x.L}:${x.k}`) ? 2 : 1) : 0), 0) + completes * 2 + cn.length * 0.1 - L * 0.05 + ((face === 'S' || face === 'W') && clearTo(L, k, face) ? 1 : 0) + rnd() * 0.3;
@@ -636,8 +636,9 @@ function score() {
   const kinds = m => { const out = { lobby: 0, office: 0, social: 0, hybrid: 0, som: 0 }; for (const j of neighboursOf(m.k)) if (A.boards[m.L][j]) out[A.boards[m.L][j].mod.use]++; if (m.L > 0 && A.boards[m.L - 1][m.k]) out[A.boards[m.L - 1][m.k].mod.use]++; if (m.L < 2 && A.boards[m.L + 1][m.k]) out[A.boards[m.L + 1][m.k].mod.use]++; return out; };
   const pairOK = m => { const n = kinds(m); return n.social >= 2 || (n.social >= 1 && n.hybrid >= 1); };          // two gathering rooms, or a gathering room and a hybrid
   const off = mods.filter(m => m.t.mod.use === 'office'), hyb = mods.filter(m => m.t.mod.use === 'hybrid'), look = gat.concat(hyb);
-  const lobbyLinks = lob.length ? 100 * lob.filter(m => kinds(m).social >= 1).length / lob.length : 100;
-  const workAccess = off.length + hyb.length ? 100 * off.concat(hyb).filter(pairOK).length / (off.length + hyb.length) : 100;
+  const lobbyLinks = lob.length ? 100 * lob.filter(m => { const n = kinds(m); return n.social >= 1 || n.hybrid >= 1; }).length / lob.length : 100;
+  const workAccess = off.length ? 100 * off.filter(pairOK).length / off.length : 100;
+  const levels = new Set(off.map(m => m.L)), flat = off.length < 2 ? 100 : levels.size >= 2 ? 100 : 0;   // Valve has no boss floor: the workspaces spread over more than one level
   const faces = m => sidesOf(m.t.mod, m.t.rot).open;
   const bayView = m => faces(m) === 'E' && clearTo(m.L, m.k, 'E');
   const toBay = off.length ? 100 * off.filter(bayView).length / off.length : 100;
@@ -650,10 +651,11 @@ function score() {
   const parts = [
     ['Joined', joined, 'one building, not separate pieces'],
     ['Public edge', street, 'lobbies at ground on the street row or a causeway side'],
-    ['Lobby links', lobbyLinks, 'every lobby touching at least one gathering room'],
-    ['Work access', workAccess, 'every workspace and hybrid reached through two gathering rooms, or a gathering room and a hybrid'],
+    ['Lobby links', lobbyLinks, 'every lobby touching a gathering room or a hybrid'],
+    ['Work access', workAccess, 'every workspace reached through two gathering rooms, or a gathering room and a hybrid'],
     ['To the bay', toBay, 'every workspace turned to the bay (R turns a tile) with nothing between it and the water on its floor'],
     ['To the neighbours', toSite, 'every gathering room and hybrid turned to the museums (south) or the Arsht Center (west), with nothing in the way on its floor'],
+    ['No boss floor', flat, 'the workspaces spread over more than one level — Valve has no managers and no top floor'],
     ['Mixed', mixed, 'every module touching a module of another use — no block of one kind'],
     ['Shared rooms', shared, 'each gathering room touching two or more modules'],
     ['Grounded', grounded, 'nothing floating'],
@@ -663,10 +665,11 @@ function score() {
     ['Ground floor raised 3 m above the flood (pilotis)', true],
     ['One connected building', g.groups === 1],
     ['Every lobby on a public edge', lob.length > 0 && street === 100],
-    ['Every lobby joins a gathering room', lob.length > 0 && lobbyLinks === 100],
-    ['Every workspace and hybrid reached through gathering rooms', off.length + hyb.length > 0 && workAccess === 100],
+    ['Every lobby joins a gathering room or a hybrid', lob.length > 0 && lobbyLinks === 100],
+    ['Every workspace reached through gathering rooms', off.length > 0 && workAccess === 100],
     ['Every workspace faces the bay, view unobstructed', off.length > 0 && toBay === 100],
     ['Gathering rooms and hybrids look to the museums or the Arsht Center', look.length > 0 && toSite === 100],
+    ['No boss floor: workspaces on more than one level', off.length >= 2 && flat === 100],
     ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100],
     ['Every gathering room is shared', gat.length > 0 && shared === 100],
     ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15],
