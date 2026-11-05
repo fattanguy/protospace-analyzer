@@ -19,7 +19,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
@@ -78,7 +78,7 @@ function makeMeshes() {
   const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = S.tf, yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
   B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
   const mesh = (kind, mat) => {
-    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: null });
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
@@ -192,8 +192,10 @@ const HTML = `
     <p class="hint">Planned from the merged volume, storey by storey, in the hollow and interior views.</p>
     <label class="chk"><input type="checkbox" data-c="voids"> Double-height voids and one atrium through the full height</label>
     <label class="chk"><input type="checkbox" data-c="stairs"> Stairs between every pair of floors</label>
-    <label class="chk"><input type="checkbox" data-c="lifts"> Glass lifts</label>
-    <label class="chk"><input type="checkbox" data-c="partitions"> Rooms and doors — glass in workspaces, solid in hybrids</label>
+    <label class="chk"><input type="checkbox" data-c="lifts"> Lift shafts</label>
+    <label class="chk"><input type="checkbox" data-c="windows"> Openings in the outer walls</label>
+    ${slider('winVar', 'Openings · variety', 0, 1, 0.05, '', 'At 0 every opening is the same, between 1.5 m piers every 6 m. Higher, the piers vary in width and some are left out — two or three bays open up as one — and every opening gets its own sill and head; now and then a bay stays closed.')}
+    <label class="chk"><input type="checkbox" data-c="partitions"> Rooms and doors — in workspaces and hybrids</label>
     <div class="xp-row rz-res"><span class="hint">Detail</span><button type="button" class="btn quiet" data-res="1">1 m</button><button type="button" class="btn quiet" data-res="2">0.5 m</button></div>
     <h2 class="eyebrow" style="margin-top:16px">Seeing inside</h2>
     ${slider('opacity', 'Shell opacity', 0.05, 1, 0.05, '')}
@@ -227,6 +229,7 @@ function syncControls() {
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
   R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The building as it looks from outside: the merged modules with their walls, opaque.';
   for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors;
+  R.root.querySelector('[data-c=windows]').disabled = S.view === 'interior'; R.root.querySelector('[data-s=winVar]').disabled = S.view === 'interior' || !S.windows;
   R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
   R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = R.root.querySelector('[data-s=tf]').disabled = !hollow() || !S.floors;
 }

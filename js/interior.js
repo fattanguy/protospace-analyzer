@@ -6,12 +6,12 @@
    · double-height voids — in every module the largest round void that fits through two or more storeys; its plates are
      cut every other storey (stacked double-height spaces), and in the module with the tallest void every one of them
      (the main atrium, through the whole height);
-   · a glass lift per module, where the most storeys line up;
+   · a lift shaft per module, where the most storeys line up;
    · a feature stair between every pair of storeys in every module (the red stair, switching back where it can), its
      stairwell cut out of the plate above;
    · partitions with doors on a grid — glass meeting rooms in the workspaces, solid rooms in the hybrids, open plan in the
      lobbies and gathering rooms — kept off the walls, the voids, the stairs and the lifts;
-   · glass balustrades with handrails round every void and stairwell.
+   · solid parapets round every void and stairwell — everything in the body's one material.
    Positions are in the building grid (x, z in voxels, as js/sdf.js) and heights in metres; the openings are handed back
    to the field (holeAt) so the plates are really cut, and the parts are built as instanced boxes. toPLY writes the
    lot as a point cloud or a mesh, every point carrying what it is (element), which module, which storey and which use. */
@@ -85,7 +85,7 @@ export function planInterior(U, mods, { LAT, yBase, H, t, tf, opts }) {
     }
   }
   const voidAt = (n, gx, gz, pad) => plan.atria.some(v => v.cut.includes(n) && Math.hypot(gx - v.x, gz - v.z) < v.r + pad * m2g);
-  // 2 · lifts: a 2.6 m glass shaft per module where the most storeys line up
+  // 2 · lifts: a 2.6 m shaft per module where the most storeys line up
   const LIFT = 2.6, taken = [];                                                    // footprints already used: [gx, gz, half x, half z] in grid units
   const free = (gx, gz, hx, hz, pad = 0.6) => taken.every(([x, z, a, c]) => Math.abs(gx - x) > hx + a + pad * m2g || Math.abs(gz - z) > hz + c + pad * m2g);
   if (opts.lifts) for (let i = 0; i < M; i++) {
@@ -139,7 +139,7 @@ export function planInterior(U, mods, { LAT, yBase, H, t, tf, opts }) {
     }
   }
   Object.assign(plan, { rise, going, risers, runM, W });
-  // 4 · partitions with doors, on a grid: glass rooms in the workspaces, solid rooms in the hybrids
+  // 4 · partitions with doors, on a grid: rooms in the workspaces and the hybrids
   plan.walls = [];
   if (opts.partitions) for (let n = 0; n < NL; n++) {
     const y = levels[n];
@@ -181,16 +181,15 @@ export function buildInterior(plan, { LAT, gridX, gridZ, mats, H, tf, t }) {
   const W = (gx, gz) => [gridX(gx), gridZ(gz)];
   const { rise, going, risers, runM } = plan, levels = plan.levels.map(y => y + tf);   // the floor tops: each plate lies on its level line
   const ceil = n => levels[n] + H - tf;                                            // the underside of the plate above
-  // balustrades: glass 1.1 m with a handrail, round voids and three sides of stairwells
+  // parapets: solid, 1.1 m, round voids and three sides of stairwells
   const rail = (n, i, x0, z0, x1, z1) => {
     const [ax, az] = W(x0, z0), [bx, bz] = W(x1, z1), len = Math.hypot(bx - ax, bz - az); if (len < 0.2) return;
     const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.atan2(bz - az, bx - ax)), y = levels[n];
-    box(6, mats.glass, (ax + bx) / 2, y + 0.55, (az + bz) / 2, len, 1.1, 0.03, q, i, n);
-    box(7, mats.metal, (ax + bx) / 2, y + 1.12, (az + bz) / 2, len, 0.05, 0.07, q, i, n);
+    box(6, mats.solid, (ax + bx) / 2, y + 0.55, (az + bz) / 2, len + 0.12, 1.1, 0.15, q, i, n);    // a solid parapet, the body's material
   };
   for (const v of plan.atria) for (const n of v.cut) { const seg = Math.max(18, Math.round(v.R * 5)); for (let k = 0; k < seg; k++) { const a0 = (k / seg) * Math.PI * 2, a1 = ((k + 1) / seg) * Math.PI * 2; rail(n, v.i, v.x + Math.cos(a0) * v.r, v.z + Math.sin(a0) * v.r, v.x + Math.cos(a1) * v.r, v.z + Math.sin(a1) * v.r); } }
   // stairs: the floor folding up into the next one — one solid flight, its soffit as thick as the plate, from the floor
-  // below to the edge of the stairwell in the floor above — with glass and a handrail up both sides
+  // below to the edge of the stairwell in the floor above — with a solid upstand up both sides
   const flights = [], flightMods = [];
   for (const s of plan.stairs) {
     const y0 = levels[s.n], along = (d, w) => [s.sx + (s.dx * d - s.dz * w) * m2g, s.sz + (s.dz * d + s.dx * w) * m2g];
@@ -202,8 +201,7 @@ export function buildInterior(plan, { LAT, gridX, gridZ, mats, H, tf, t }) {
     const slope = Math.atan2(H, runM), len = Math.hypot(H, runM), qs = qy.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), slope));
     for (const w of [-plan.W / 2 - 0.03, plan.W / 2 + 0.03]) {
       const [gx, gz] = along(runM / 2, w), [wx, wz] = W(gx, gz);
-      box(6, mats.glass, wx, y0 + H / 2 + 0.55, wz, len, 0.95, 0.025, qs, s.i, s.n);                   // glass up the flight
-      box(7, mats.metal, wx, y0 + H / 2 + 1.05, wz, len, 0.05, 0.06, qs, s.i, s.n);                    // handrail
+      box(6, mats.solid, wx, y0 + H / 2 + 0.45, wz, len, 1.0, 0.12, qs, s.i, s.n);                     // a solid upstand up the flight
     }
     // the stairwell in the plate above: rails on both long sides and the low end
     const n1 = s.n + 1, [a1, b1] = along(-0.4, -plan.W / 2 - 0.25), [a2, b2] = along(runM + 0.4, -plan.W / 2 - 0.25), [a3, b3] = along(runM + 0.4, plan.W / 2 + 0.25), [a4, b4] = along(-0.4, plan.W / 2 + 0.25);
@@ -216,28 +214,22 @@ export function buildInterior(plan, { LAT, gridX, gridZ, mats, H, tf, t }) {
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
     const m = new THREE.Mesh(g, mats.stair); m.castShadow = m.receiveShadow = true; m.name = 'stairs'; m.userData = { element: 2, mods }; group.add(m);
   }
-  // lifts: a glass shaft with dark corner posts and a cab, through the storeys they serve
+  // lifts: a solid shaft in the body's material through the storeys they serve, open on one side at every floor
   for (const l of plan.lifts) {
-    const [wx, wz] = W(l.x, l.z), y0 = levels[l.a], y1 = ceil(l.a + l.len - 1), h = y1 - y0, S = 2.6;
-    for (const [ox, oz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) box(3, mats.dark, wx + ox * S / 2, y0 + h / 2, wz + oz * S / 2, 0.16, h, 0.16, null, l.i, l.a);
-    for (const [ox, oz, sx, sz] of [[0, -1, S, 0.03], [0, 1, S, 0.03], [-1, 0, 0.03, S], [1, 0, 0.03, S]]) box(4, mats.glass, wx + ox * S / 2, y0 + h / 2, wz + oz * S / 2, sx, h, sz, null, l.i, l.a);
-    for (let n = l.a; n < l.a + l.len; n++) box(3, mats.dark, wx, ceil(n) - 0.08, wz, S, 0.16, S, null, l.i, n);   // the frame at every storey
-    box(3, mats.cab, wx, y0 + 1.25, wz, S - 0.5, 2.4, S - 0.5, null, l.i, l.a);   // the cab, waiting on the lowest floor
+    const [wx, wz] = W(l.x, l.z), y0 = levels[l.a], y1 = ceil(l.a + l.len - 1), h = y1 - y0, S = 2.6, T = 0.25;
+    for (const [ox, oz, sx, sz] of [[0, -1, S, T], [-1, 0, T, S], [1, 0, T, S]]) box(3, mats.solid, wx + ox * (S - T) / 2, y0 + h / 2, wz + oz * (S - T) / 2, sx, h, sz, null, l.i, l.a);
+    for (let n = l.a; n < l.a + l.len; n++) { const yb = levels[n], hh = ceil(n) - yb; box(3, mats.solid, wx, yb + 2.4 + (hh - 2.4) / 2, wz + (S - T) / 2, S, hh - 2.4, T, null, l.i, n); }   // the door side: a lintel over the door at every floor
+    box(3, mats.cab, wx, y0 + 1.25, wz, S - 0.6, 2.4, S - 0.6, null, l.i, l.a);   // the cab, waiting on the lowest floor
   }
-  // partitions: glass with a frame (workspaces) or solid (hybrids), floor to the plate above
+  // partitions: solid, in the body's material, floor to the plate above
   for (const p of plan.walls) {
     const y0 = levels[p.n], h = ceil(p.n) - y0, mid = (p.a + p.b) / 2, len = (p.b - p.a) * LAT;
-    const [wx, wz] = p.axis === 0 ? W(mid, p.line) : W(p.line, mid), [sx, sz] = p.axis === 0 ? [len, p.glass ? 0.04 : 0.15] : [p.glass ? 0.04 : 0.15, len];
-    if (p.glass) {
-      box(4, mats.glass, wx, y0 + h / 2, wz, sx, h, sz, null, p.i, p.n);
-      box(7, mats.metal, wx, y0 + h - 0.04, wz, Math.max(sx, 0.08), 0.08, Math.max(sz, 0.08), null, p.i, p.n);
-      box(7, mats.metal, wx, y0 + 0.04, wz, Math.max(sx, 0.08), 0.08, Math.max(sz, 0.08), null, p.i, p.n);
-      for (const e of [p.a, p.b]) { const [ex, ez] = p.axis === 0 ? W(e, p.line) : W(p.line, e); box(7, mats.metal, ex, y0 + h / 2, ez, 0.08, h, 0.08, null, p.i, p.n); }   // posts at the ends: the door frames
-    } else box(5, mats.solid, wx, y0 + h / 2, wz, sx, h, sz, null, p.i, p.n);
+    const [wx, wz] = p.axis === 0 ? W(mid, p.line) : W(p.line, mid), [sx, sz] = p.axis === 0 ? [len, 0.15] : [0.15, len];
+    box(5, mats.solid, wx, y0 + h / 2, wz, sx, h, sz, null, p.i, p.n);
   }
   const geo = new THREE.BoxGeometry(1, 1, 1), M = new THREE.Matrix4();
   for (const { el, mat, list } of buckets.values()) {
-    const im = new THREE.InstancedMesh(geo, mat, list.length); im.castShadow = el !== 4 && el !== 6; im.receiveShadow = true;
+    const im = new THREE.InstancedMesh(geo, mat, list.length); im.castShadow = true; im.receiveShadow = true;
     list.forEach((b, k) => { M.compose(b.p, b.q, b.s); im.setMatrixAt(k, M); });
     im.userData = { element: el, items: list.map(b => ({ i: b.i, n: b.n })), shared: true }; im.name = ELEMENTS[el];
     group.add(im);
