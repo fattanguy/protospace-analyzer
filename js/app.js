@@ -11,6 +11,7 @@ import { bayBoxes, measureBay, programScores, highlightCells, signature, pickDis
 import { GUIDE, READING } from './guide.js';
 import { mount as mountExplorer } from './explorer.js';
 import { mount as mountAssemble } from './assemble.js';
+import { mount as mountRationalize } from './rationalize.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -436,7 +437,7 @@ async function scanAnimation() {
 }
 
 // ------------------------------------------------------------------ tabs
-const TAB_OF = { generator: 'generator', analyze: 'analyze', program: 'program', model: 'model', explorer: 'explorer', assemble: 'assemble' };
+const TAB_OF = { generator: 'generator', analyze: 'analyze', program: 'program', model: 'model', explorer: 'explorer', assemble: 'assemble', rationalize: 'rationalize' };
 function showTab(name) {
   name = TAB_OF[name] || 'generator';
   A.tab = name;
@@ -446,6 +447,7 @@ function showTab(name) {
   window.scrollTo({ top: 0 });
   if (name === 'explorer') { if (A.explorer) A.explorer.show(); }
   else if (name === 'assemble') { if (A.assemble) A.assemble.show(); }
+  else if (name === 'rationalize') { if (A.rationalize) A.rationalize.show(); }
   else if (name !== 'generator') { if (A.dirty || !A.item) loadFrame(); else if (name === 'program') renderProgram(); }
   window.dispatchEvent(new Event('resize'));
 }
@@ -482,6 +484,7 @@ function boot() {
     frameBays: () => A.item ? bayBoxes(A.item.vox).map(b => ({ name: `${A.animId === 'current' ? 'On screen' : animName(A.animId)} · frame ${A.frame} · bay ${b.i + 1}`, frame: `${A.animId === 'current' ? 'the Generator' : animName(A.animId)}, frame ${A.frame}`, vox: A.item.vox, box: { x0: b.x0, x1: b.x1, y0: 0, y1: A.item.vox.ny, z0: 0, z1: A.item.vox.nz } })) : null,
   });
   A.assemble = mountAssemble($('#assembleRoot'));
+  A.rationalize = mountRationalize($('#rationalizeRoot'), { getBuilding: () => A.assemble.placements() });
   window.addEventListener('xp:build', e => { A.assemble.addModule(e.detail); showTab('assemble'); });
   PSGen.mount({
     analyze: (vox, thr) => analyzeVox(vox, thr),

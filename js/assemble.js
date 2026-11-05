@@ -514,6 +514,23 @@ function buildFused() {
   A.three.callouts = callouts; A.three.links = links; A.three.placed = placed;
   applyHighlight();
 }
+/* The building as the Rationalize tab needs it: every placed module as its voxels in the building's grid (the same
+   placement the fused body uses), with where it stands on the board, and the grid ↔ world mapping. */
+export function placements() {
+  if (!A.ready) return null;
+  const mods = [];
+  for (let L = 0; L < 3; L++) A.boards[L].forEach((t, k) => {
+    if (!t) return;
+    const [c, r] = cellOf(k), { gx0, gy0, gz0 } = gridBase(c, r, L), m = t.mod, n = N, vox = [];
+    for (let z = 0; z < n; z++) for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      if (!m.occ[x + n * (y + n * z)]) continue;
+      const [u, v] = latToSlot(x, z, t.rot); vox.push(gx0 + u - 1, gy0 + y, gz0 + v - 1);
+    }
+    mods.push({ slot: `${L}:${k}`, L, k, c, r, id: m.id, name: m.name, use: m.use, rot: t.rot, vox: Int32Array.from(vox) });
+  });
+  const key = mods.map(m => `${m.slot}=${m.id}/${m.rot}`).join(',');
+  return { key, mods, LAT, GX, GY, GZ, PODIUM_V, PITCH_V, cols: SITE.cols, site: { ...SITE }, gridX, gridY, gridZ, layers: LAYERS };
+}
 /* The older building: every module its own mesh in its bay. */
 function buildSeparate() {
   const { building, labels } = A.three; clearBuilding(); A.pairs = null;
@@ -900,5 +917,5 @@ export function mount(root) {
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(A.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ.obj'));
   R.stats.textContent = 'Loading the fifteen modules…';
   loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) autoArrange(7); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
-  return { show() { window.dispatchEvent(new Event('resize')); }, addModule };
+  return { show() { window.dispatchEvent(new Event('resize')); }, addModule, placements };
 }
