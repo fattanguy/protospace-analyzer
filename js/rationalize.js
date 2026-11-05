@@ -19,9 +19,9 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
-const hollow = () => S.view !== 'solid';                                          // 'solid': the modules as they look, opaque · 'hollow': walls, floors, see-through
+const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
 let R = {};
 
@@ -78,7 +78,7 @@ function makeMeshes() {
   const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = S.tf, yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
   B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
   const mesh = (kind, mat) => {
-    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && hollow() && S.windows ? { sill: 1.0, head: 1.0, pier: 6, pierW: 1.5, LAT: b.LAT } : null });
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view === 'solid' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
@@ -194,7 +194,8 @@ const HTML = `
     <label class="chk"><input type="checkbox" data-c="stairs"> Stairs between every pair of floors</label>
     <label class="chk"><input type="checkbox" data-c="lifts"> Glass lifts</label>
     <label class="chk"><input type="checkbox" data-c="partitions"> Rooms and doors — glass in workspaces, solid in hybrids</label>
-    <label class="chk"><input type="checkbox" data-c="windows"> Windows in the walls, between piers every 6 m</label>
+    <label class="chk"><input type="checkbox" data-c="windows"> Windows in the walls, between piers (in the As they look view)</label>
+    ${slider('winVar', 'Openings · variety', 0, 1, 0.05, '', 'At 0 every window is the same, between 1.5 m piers every 6 m. Higher, the piers vary in width and some are left out — two or three bays open up as one — and every window gets its own sill and head; now and then a bay stays closed.')}
     <div class="xp-row rz-res"><span class="hint">Detail</span><button type="button" class="btn quiet" data-res="1">1 m</button><button type="button" class="btn quiet" data-res="2">0.5 m</button></div>
     <h2 class="eyebrow" style="margin-top:16px">Seeing inside</h2>
     ${slider('opacity', 'Shell opacity', 0.05, 1, 0.05, '')}
@@ -222,12 +223,12 @@ function report() {
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
-  $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
+  $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'winVar' ? (v <= 0 ? 'none' : `${Math.round(v * 100)} %`) : k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
   $$('[data-c]', R.root).forEach(x => { x.checked = !!S[x.dataset.c]; });
   $$('[data-res]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.res === S.res));
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
-  R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The merged modules as solid, opaque volumes — how the building looks from outside.';
-  for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors; R.root.querySelector('[data-c=windows]').disabled = S.view !== 'hollow';
+  R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The building as it looks: opaque walls with their openings, and the floors, stairs and rooms seen through them.';
+  for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors; R.root.querySelector('[data-c=windows]').disabled = R.root.querySelector('[data-s=winVar]').disabled = S.view !== 'solid';
   R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
   R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = R.root.querySelector('[data-s=tf]').disabled = !hollow() || !S.floors;
 }
@@ -287,10 +288,10 @@ function initThree(canvas) {
   plane(250, 100, 0xdcd8d0, 125, -50, 0.02); plane(650, 400, 0x9db4c0, 125, -300, -0.3, { roughness: 0.25 }); plane(650, 60, 0xb9b9b9, 125, 30, -0.05); plane(650, 400, 0xc9c5bd, 125, 260, -0.1);
   plane(60, 160, 0xb9b9b9, -30, -50, -0.05); plane(60, 160, 0xb9b9b9, 280, -50, -0.05);
   const planes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6), new THREE.Plane(new THREE.Vector3(0, 0, -1), 1e6), new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6)];
-  const SHELL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, clippingPlanes: planes, clipShadows: true, transparent: true, opacity: 0.35, depthWrite: false });
-  const FLOOR = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, clippingPlanes: planes, clipShadows: true });
+  const SHELL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, shadowSide: THREE.BackSide, clippingPlanes: planes, clipShadows: true, transparent: true, opacity: 0.35, depthWrite: false });
+  const FLOOR = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, shadowSide: THREE.BackSide, clippingPlanes: planes, clipShadows: true });
   const part = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, clippingPlanes: planes, clipShadows: true, ...extra });
-  const PARTS = { stair: part(BODY, { roughness: 0.85, side: THREE.DoubleSide }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(BODY, { roughness: 0.85 }),
+  const PARTS = { stair: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(BODY, { roughness: 0.85 }),
     glass: part(0xa9cfdc, { transparent: true, opacity: 0.28, depthWrite: false, roughness: 0.1, metalness: 0.1, side: THREE.DoubleSide }) };
   const building = new THREE.Group(), interior = new THREE.Group(); scene.add(building, interior);
   B.three = { renderer, scene, camera, controls, building, interior, canvas, planes, SHELL, FLOOR, PARTS, raycaster: new THREE.Raycaster() };
@@ -327,7 +328,7 @@ export function mount(root, { getBuilding }) {
   root.innerHTML = HTML; R = { root }; $$('[data-v]', root).forEach(el => { R[el.dataset.v] = el; });
   initThree(R.canvas); syncControls();
   // sliders and switches: each one re-runs only the stage it changes
-  const STAGE = { k: 1, t: 2, H: 2, tf: 2, soft: 0 };
+  const STAGE = { k: 1, t: 2, H: 2, tf: 2, winVar: 2, soft: 0 };
   $$('[data-s]', root).forEach(x => x.addEventListener('input', () => {
     const k = x.dataset.s; S[k] = +x.value; syncControls(); save();
     if (k === 'opacity') applyLook(); else if (/^cut/.test(k)) applyCuts(); else { if (k === 'k') renderPairs(); schedule(STAGE[k], 220); }

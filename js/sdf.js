@@ -9,6 +9,7 @@
    on the continuous field at up to twice the voxel resolution. */
 
 const INF = 1e20;
+const hash3 = (a, b, c) => { const x = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return x - Math.floor(x); };   // 0…1, the same for the same three integers
 
 /* 1-D squared distance transform of f (length n) into d; v, z are scratch. */
 function edt1d(f, n, d, v, z) {
@@ -110,9 +111,9 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
     const zc = z / s, z0 = Math.min(U.nz - 2, Math.floor(zc)), tz = zc - z0;
     for (let y = 0; y < FY; y++) {
       const yc = y / s, y0 = Math.min(ny - 2, Math.floor(yc)), ty = yc - y0, wy = ys[y];
-      let plate = 0, level = Math.round((wy - yBase) / H), winY = 1e9;
+      let plate = 0, level = Math.round((wy - yBase) / H);
       if (kind === 'floors') { let q = (wy - yBase) % H; if (q < 0) q += H; if (q > H / 2) q -= H; plate = Math.abs(q - tf / 2) - tf / 2; }   // the plate lies on the level line
-      if (windows && wy > yBase + 0.3) { let q = (wy - yBase) % H; if (q < 0) q += H; winY = Math.max(windows.sill - q, q - (H - windows.head)); }   // negative inside the band
+      const storey = Math.floor((wy - yBase) / H), qy = wy - yBase - storey * H, inBand = windows && wy > yBase + 0.3;   // which storey, and how high in it
       for (let x = 0; x < FX; x++, o++) {
         const xc = x / s, x0 = Math.min(nx - 2, Math.floor(xc)), tx = xc - x0, b = x0 + nx * (y0 + ny * z0);
         const c00 = f[b] + (f[b + 1] - f[b]) * tx, c10 = f[b + nx] + (f[b + nx + 1] - f[b + nx]) * tx;
@@ -120,13 +121,20 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
         const c0 = c00 + (c10 - c00) * ty, c1 = c01 + (c11 - c01) * ty, v = c0 + (c1 - c0) * tz;
         if (kind === 'shell') {
           let w = t > 0 ? Math.max(v, -(v + t)) : v;
-          if (winY < 0.6 && w < 0.6) {                                                   // near a wall, in the window band: is the wall upright here?
+          if (inBand && w < 0.6) {                                                     // near a wall: is it upright here?
             const cx = Math.min(nx - 2, Math.max(1, Math.round(xc))), cy = Math.min(ny - 2, Math.max(1, Math.round(yc))), cz = Math.min(U.nz - 2, Math.max(1, Math.round(zc))), c = cx + nx * (cy + ny * cz);
             const gx = f[c + 1] - f[c - 1], gy = f[c + nx] - f[c - nx], gz = f[c + sxy] - f[c - sxy];
             if (gy * gy < 0.2 * (gx * gx + gy * gy + gz * gz)) {
-              const P = windows.pier || 6, ph = (windows.pierW || 1.5) / 2, along = (Math.abs(gx) > Math.abs(gz) ? U.z0 + zc : U.x0 + xc) * (windows.LAT || 1);   // along the wall
-              let q = (along % P + P) % P; if (q > P / 2) q -= P;                       // to the nearest pier's centre
-              w = Math.max(w, -Math.max(winY, ph - Math.abs(q)));                       // a window, except where a pier stands
+              /* The openings: one per bay between piers every P metres along the wall. With variety, each pier has its own
+                 width and some are left out (two or three bays become one wide opening), each bay its own sill and head,
+                 and now and then a bay stays closed — the same every time for the same wall, bay and storey. */
+              const P = windows.pier || 6, vr = windows.vary ?? 0.6, ax = Math.abs(gx) > Math.abs(gz) ? 1 : 2, sd = (ax === 1 ? gx : gz) > 0 ? 1 : 0, face = ax * 2 + sd;
+              const along = (ax === 1 ? U.z0 + zc : U.x0 + xc) * (windows.LAT || 1), k = Math.round(along / P), j = Math.floor(along / P), qd = along - k * P;
+              const skip = hash3(k, storey, face) < 0.55 * vr, ph = (windows.pierW || 1.5) / 2 * (1 - 0.5 * vr) + hash3(k, storey, face + 7) * vr * 1.2;
+              const closed = hash3(j, storey, face + 13) < 0.1 * vr;
+              const sill = Math.min(H - 1.2, Math.max(0.15, windows.sill + (hash3(j, storey, face + 19) - 0.5) * 1.6 * vr)), head = Math.min(H - sill - 1, Math.max(0.15, windows.head + (hash3(j, storey, face + 29) - 0.5) * 1.6 * vr));
+              const winY = Math.max(sill - qy, qy - (H - head)), pier = skip ? -1e9 : ph - Math.abs(qd);
+              if (!closed) w = Math.max(w, -Math.max(winY, pier));                    // a window, except where a pier stands
             }
           }
           out[o] = w;
@@ -203,7 +211,7 @@ export function plateField(U, s, { yMid, yAbove, t, holeAt = null }) {
    at 0.5 and 1.5, so top and bottom are flat and parallel; → { pos (x, z in fine units; y 0 = bottom, 1 = top), index } */
 export function extrudeOutline(P) {
   const { F, FX, FZ } = P, G = new Float32Array(FX * 3 * FZ);
-  for (let z = 0; z < FZ; z++) for (let y = 0; y < 3; y++) for (let x = 0; x < FX; x++) G[x + FX * (y + 3 * z)] = Math.max(F[x + FX * z] * 4, Math.abs(y - 1) - 0.5);
+  for (let z = 0; z < FZ; z++) for (let y = 0; y < 3; y++) for (let x = 0; x < FX; x++) G[x + FX * (y + 3 * z)] = Math.max(F[x + FX * z], Math.abs(y - 1) - 0.5);   // the outline interpolates smoothly; heights are snapped below
   const r = netsField(G, FX, 3, FZ);
   for (let i = 1; i < r.pos.length; i += 3) r.pos[i] = r.pos[i] < 1 ? 0 : 1;
   return r;

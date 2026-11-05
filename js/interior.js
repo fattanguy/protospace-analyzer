@@ -16,7 +16,8 @@
    to the field (holeAt) so the plates are really cut, and the parts are built as instanced boxes. toPLY writes the
    lot as a point cloud or a mesh, every point carrying what it is (element), which module, which storey and which use. */
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { netsField } from './sdf.js';
+import { taubin } from './fuse.js';
 
 export const ELEMENTS = ['wall', 'floor', 'stair', 'lift', 'glass partition', 'solid partition', 'balustrade', 'metal'];
 export const ELEMENT_COLOR = ['#e9e5de', '#a79f93', '#c62828', '#3a3a3a', '#9fc3d1', '#d8d2c8', '#b9d3dc', '#6e6e6e'];
@@ -194,15 +195,10 @@ export function buildInterior(plan, { LAT, gridX, gridZ, mats, H, tf, t }) {
   for (const s of plan.stairs) {
     const y0 = levels[s.n], along = (d, w) => [s.sx + (s.dx * d - s.dz * w) * m2g, s.sz + (s.dz * d + s.dx * w) * m2g];
     const yaw = -Math.atan2(-s.dz, s.dx), qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);   // the run's direction in the world (z is flipped)
-    const end = runM + 0.4, shape = new THREE.Shape();                              // the profile in (along the run, up): steps on top, a straight soffit below
-    shape.moveTo(0, 0);
-    for (let k = 0; k < risers - 1; k++) { shape.lineTo(k * going, (k + 1) * rise); shape.lineTo((k + 1) * going, (k + 1) * rise); }
-    shape.lineTo((risers - 1) * going, H); shape.lineTo(end, H); shape.lineTo(end, H - tf); shape.lineTo(0, 0);
-    const g = new THREE.ExtrudeGeometry(shape, { depth: plan.W, bevelEnabled: false, steps: 1, curveSegments: 1 });
-    g.translate(0, 0, -plan.W / 2);
+    const g = grownFlight({ H, tf, rise, going, risers, runM, W: plan.W, k: 0.9 });          // the flight and its fillets, in its own frame (s along, y up, w across)
     const [ox, oz] = W(s.sx, s.sz), es = new THREE.Vector3(s.dx, 0, -s.dz).normalize(), ey = new THREE.Vector3(0, 1, 0), ew = es.clone().cross(ey);
     g.applyMatrix4(new THREE.Matrix4().makeBasis(es, ey, ew).setPosition(ox, y0, oz));
-    flights.push(g.index ? g.toNonIndexed() : g); flightMods.push(s.i);
+    flights.push(g); flightMods.push(s.i);
     const slope = Math.atan2(H, runM), len = Math.hypot(H, runM), qs = qy.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), slope));
     for (const w of [-plan.W / 2 - 0.03, plan.W / 2 + 0.03]) {
       const [gx, gz] = along(runM / 2, w), [wx, wz] = W(gx, gz);
@@ -214,10 +210,11 @@ export function buildInterior(plan, { LAT, gridX, gridZ, mats, H, tf, t }) {
     if (n1 < levels.length) { rail(n1, s.i, a1, b1, a2, b2); rail(n1, s.i, a4, b4, a3, b3); rail(n1, s.i, a1, b1, a4, b4); }
   }
   if (flights.length) {
-    const mods = []; flights.forEach((g, k) => { for (let v = 0; v < g.getAttribute('position').count; v++) mods.push(flightMods[k]); });
-    let g = mergeGeometries(flights.map(x => { const y = new THREE.BufferGeometry(); y.setAttribute('position', x.getAttribute('position')); return y; }));
-    const n = g.getAttribute('position').count, idx = new Uint32Array(n); for (let k = 0; k < n; k++) idx[k] = k; g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
-    const m = new THREE.Mesh(g, mats.stair); m.castShadow = m.receiveShadow = true; m.name = 'stairs'; m.userData = { element: 2, mods: Int16Array.from(mods) }; group.add(m);
+    let nv = 0, ni = 0; for (const g of flights) { nv += g.getAttribute('position').count; ni += g.index.count; }
+    const pos = new Float32Array(nv * 3), idx = new Uint32Array(ni), mods = new Int16Array(nv); let ov = 0, oi = 0;
+    flights.forEach((g, k) => { const p = g.getAttribute('position').array, ix = g.index.array; pos.set(p, ov * 3); for (let j = 0; j < ix.length; j++) idx[oi + j] = ix[j] + ov; mods.fill(flightMods[k], ov, ov + p.length / 3); ov += p.length / 3; oi += ix.length; });
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+    const m = new THREE.Mesh(g, mats.stair); m.castShadow = m.receiveShadow = true; m.name = 'stairs'; m.userData = { element: 2, mods }; group.add(m);
   }
   // lifts: a glass shaft with dark corner posts and a cab, through the storeys they serve
   for (const l of plan.lifts) {
@@ -246,6 +243,40 @@ export function buildInterior(plan, { LAT, gridX, gridZ, mats, H, tf, t }) {
     group.add(im);
   }
   return group;
+}
+
+/* A stair grown out of the floors: the flight (steps on top, a straight soffit as thick as the plate) smooth-unioned with
+   the plate it starts on and the plate it arrives at (with its stairwell), radius k — so the floor swells up into the
+   first steps, the soffit sweeps into the floor above and the top step runs into the stairwell's edge — and then only
+   what that adds to the plates is kept (the plates themselves are drawn already). Local frame: s along the run from the
+   first riser, y up from the lower floor's top, w across; → BufferGeometry in that frame. */
+function grownFlight({ H, tf, rise, going, risers, runM, W, k }) {
+  const end = runM + 0.4, res = 0.13, s0 = -1.6, s1 = end + 1.6, y0 = -tf - 0.9, y1 = H + 0.9, w0 = -W / 2 - 1.4, w1 = W / 2 + 1.4;
+  const NX = Math.ceil((s1 - s0) / res) + 1, NY = Math.ceil((y1 - y0) / res) + 1, NZ = Math.ceil((w1 - w0) / res) + 1, F = new Float32Array(NX * NY * NZ);
+  const box = (px, py, ax, ay, bx, by) => { const cx = (ax + bx) / 2, cy = (ay + by) / 2, qx = Math.abs(px - cx) - (bx - ax) / 2, qy = Math.abs(py - cy) - (by - ay) / 2; return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0); };
+  const L = Math.hypot(end, H - tf), nx = (H - tf) / L, ny = -end / L;               // the soffit's downward normal
+  const smin = (a, b) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
+  for (let iz = 0, o = 0; iz < NZ; iz++) { const w = w0 + iz * res, dw = Math.abs(w) - W / 2;
+    for (let iy = 0; iy < NY; iy++) { const y = y0 + iy * res;
+      const pn = Math.abs(y + tf / 2) - tf / 2, slab1 = Math.abs(y - (H - tf / 2)) - tf / 2;
+      for (let ix = 0; ix < NX; ix++, o++) {
+        const sx = s0 + ix * res;
+        let prof = box(sx, y, (risers - 1) * going, -10, end, H);                    // the last tread, flush with the floor above
+        const kk = Math.max(0, Math.min(risers - 2, Math.floor(sx / going)));
+        for (let q = Math.max(0, kk - 1); q <= Math.min(risers - 2, kk + 1); q++) prof = Math.min(prof, box(sx, y, q * going, -10, end, (q + 1) * rise));
+        prof = Math.max(prof, sx * nx + y * ny, -sx, sx - end);
+        const stair = Math.max(prof, dw);
+        const well = box(sx, w, -0.4, -W / 2 - 0.25, end, W / 2 + 0.25), pn1 = Math.max(slab1, -well);
+        const P = Math.min(pn, pn1), f = smin(stair, P);
+        F[o] = Math.max(f, -P + 0.002);                                              // only what the stair adds to the plates
+      }
+    }
+  }
+  const { pos, index } = netsField(F, NX, NY, NZ);
+  taubin(pos, index, 2);
+  for (let i = 0; i < pos.length; i += 3) { pos[i] = s0 + pos[i] * res; pos[i + 1] = y0 + pos[i + 1] * res; pos[i + 2] = w0 + pos[i + 2] * res; }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(index instanceof Uint32Array ? index : new Uint32Array(index), 1));
+  return g;
 }
 
 // ------------------------------------------------------------------ PLY
