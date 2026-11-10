@@ -314,15 +314,7 @@ function initThree(canvas) {
   const sun = new THREE.DirectionalLight(0xffffff, 2.0); sun.position.set(-150, 220, 160); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera; sc.left = -220; sc.right = 220; sc.top = 220; sc.bottom = -220; sc.near = 10; sc.far = 800; sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.3; sun.target.position.set(SITE.length / 2, 0, -SITE.width / 2); scene.add(sun, sun.target);
   const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(200, 80, -200); scene.add(fill);
-  // the site: the lot, the bay to the east, the street and plaza to the west, the causeways north and south
-  const site = new THREE.Group(); scene.add(site);
-  const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, ...extra });
-  const plane = (w, d, color, x, z, y = 0, extra = {}) => { const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(color, extra)); p.rotation.x = -Math.PI / 2; p.position.set(x, y, z); p.receiveShadow = true; site.add(p); return p; };
-  plane(SITE.length, SITE.width, 0xdcd8d0, SITE.length / 2, -SITE.width / 2, 0.02);                        // the lot
-  plane(SITE.length + 400, 400, 0x9db4c0, SITE.length / 2, -SITE.width - 200, -0.3, { roughness: 0.25, metalness: 0.05 });   // Biscayne Bay
-  plane(SITE.length + 400, 60, 0xb9b9b9, SITE.length / 2, 30, -0.05);                                      // Herald Plaza / the street
-  plane(SITE.length + 400, 400, 0xc9c5bd, SITE.length / 2, 260, -0.1);                                    // the city behind
-  plane(60, SITE.width + 60, 0xb9b9b9, -30, -SITE.width / 2, -0.05); plane(60, SITE.width + 60, 0xb9b9b9, SITE.length + 30, -SITE.width / 2, -0.05);   // causeways
+  scene.background = new THREE.Color(0x000000);                                     // no site in the 3D view: the building alone, on black
   const building = new THREE.Group(); scene.add(building);
   const labels = new THREE.Group(); scene.add(labels);
   A.three = { renderer, scene, camera, controls, building, labels, canvas };

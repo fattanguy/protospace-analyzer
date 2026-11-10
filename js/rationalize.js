@@ -284,10 +284,7 @@ function initThree(canvas) {
   const sun = new THREE.DirectionalLight(0xffffff, 1.9); sun.position.set(-150, 220, 160); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera; sc.left = -220; sc.right = 220; sc.top = 220; sc.bottom = -220; sc.near = 10; sc.far = 800; sun.shadow.bias = -0.0018; sun.shadow.normalBias = 0.6; sun.target.position.set(125, 0, -50); scene.add(sun, sun.target);
   const fill = new THREE.DirectionalLight(0xffffff, 0.45); fill.position.set(200, 80, -200); scene.add(fill);
-  const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.95, metalness: 0, ...extra });
-  const plane = (w, d, color, x, z, y = 0, extra = {}) => { const p = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat(color, extra)); p.rotation.x = -Math.PI / 2; p.position.set(x, y, z); p.receiveShadow = true; scene.add(p); };
-  plane(250, 100, 0xdcd8d0, 125, -50, 0.02); plane(650, 400, 0x9db4c0, 125, -300, -0.3, { roughness: 0.25 }); plane(650, 60, 0xb9b9b9, 125, 30, -0.05); plane(650, 400, 0xc9c5bd, 125, 260, -0.1);
-  plane(60, 160, 0xb9b9b9, -30, -50, -0.05); plane(60, 160, 0xb9b9b9, 280, -50, -0.05);
+  scene.background = new THREE.Color(0x000000);                                     // no site in the 3D view: the building alone, on black
   const planes = [new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6), new THREE.Plane(new THREE.Vector3(0, 0, -1), 1e6), new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6)];
   const SHELL = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, shadowSide: THREE.BackSide, clippingPlanes: planes, clipShadows: true, transparent: true, opacity: 0.35, depthWrite: false });
   const FLOOR = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, shadowSide: THREE.BackSide, clippingPlanes: planes, clipShadows: true });
