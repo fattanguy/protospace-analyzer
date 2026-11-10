@@ -507,3 +507,7 @@
 .rz-prow:hover { border-color: #666; } .rz-prow.on { border-color: var(--accent); } .rz-prow.set b { color: var(--accent); }
 .rz-viewer canvas { height: 640px; }
 @media (max-width: 900px) { .rz-viewer canvas { height: 420px; } }
+.rz-presets { display: grid; grid-template-columns: 1fr; gap: 5px; margin: 6px 0 4px; }
+.rz-preset { display: grid; grid-template-columns: 22px 1fr; grid-template-rows: auto auto; text-align: left; background: none; border: 1px solid var(--rule); color: var(--ink2); padding: 6px 9px; font: inherit; font-size: 12px; cursor: pointer; }
+.rz-preset b { grid-row: 1 / span 2; align-self: center; font-weight: 500; color: var(--accent); font-size: 15px; } .rz-preset span { color: var(--ink); } .rz-preset small { font-size: 11px; color: var(--ink3, #8a8a8a); }
+.rz-preset:hover { border-color: #666; } .rz-preset.on { border-color: var(--accent); background: var(--panel); }

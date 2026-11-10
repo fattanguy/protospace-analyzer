@@ -484,7 +484,7 @@ function boot() {
     frameBays: () => A.item ? bayBoxes(A.item.vox).map(b => ({ name: `${A.animId === 'current' ? 'On screen' : animName(A.animId)} · frame ${A.frame} · bay ${b.i + 1}`, frame: `${A.animId === 'current' ? 'the Generator' : animName(A.animId)}, frame ${A.frame}`, vox: A.item.vox, box: { x0: b.x0, x1: b.x1, y0: 0, y1: A.item.vox.ny, z0: 0, z1: A.item.vox.nz } })) : null,
   });
   A.assemble = mountAssemble($('#assembleRoot'));
-  A.rationalize = mountRationalize($('#rationalizeRoot'), { getBuilding: () => A.assemble.placements() });
+  A.rationalize = mountRationalize($('#rationalizeRoot'), { getBuilding: () => A.assemble.placements(), useBoards: snap => A.assemble.useBoards(snap), boardSnapshot: () => A.assemble.boardSnapshot() });
   window.addEventListener('xp:build', e => { A.assemble.addModule(e.detail); showTab('assemble'); });
   PSGen.mount({
     analyze: (vox, thr) => analyzeVox(vox, thr),

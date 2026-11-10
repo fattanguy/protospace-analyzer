@@ -173,7 +173,10 @@ const slider = (key, label, min, max, step, unit, hint = '') => `<div class="xp-
 const HTML = `
 <div class="as rz">
   <aside class="xp-controls as-controls" aria-label="Rationalize controls">
-    <h2 class="eyebrow">Show the modules</h2>
+    <h2 class="eyebrow">Start from · the five best buildings</h2>
+    <p class="hint">Five arrangements that score 100 with every goal met, found by searching outward from the explainer's building. Picking one puts it on the Assemble board too (undo there brings yours back); a first visit starts from A.</p>
+    <div class="rz-presets" data-v="presets"></div>
+    <h2 class="eyebrow" style="margin-top:16px">Show the modules</h2>
     <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button><button type="button" class="btn quiet" data-mode="interior">Interior only</button></div>
     <p class="hint" data-v="modeNote"></p>
     <h2 class="eyebrow" style="margin-top:16px">Merging</h2>
@@ -322,7 +325,7 @@ function exportPLY(mode) {
 }
 function download(blob, name) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
 
-export function mount(root, { getBuilding }) {
+export function mount(root, { getBuilding, useBoards = null, boardSnapshot = null }) {
   root.innerHTML = HTML; R = { root }; $$('[data-v]', root).forEach(el => { R[el.dataset.v] = el; });
   initThree(R.canvas); syncControls();
   // sliders and switches: each one re-runs only the stage it changes
@@ -365,10 +368,24 @@ export function mount(root, { getBuilding }) {
   });
   R.canvas.addEventListener('pointerleave', () => { if (B.hover >= 0) { B.hover = -1; paint(); R.tip.innerHTML = '&nbsp;'; } });
   let first = true;
+  // the five best buildings: load one onto the board; mark the one that is there now
+  let PRESETS = [];
+  const sameBoard = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const renderPresets = () => {
+    const now = boardSnapshot ? boardSnapshot() : null;
+    R.presets.innerHTML = PRESETS.map((p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)}"><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.total} · ${p.goals}/${p.of} goals · ${p.n} modules</small></button>`).join('') || '<p class="hint">Loading…</p>';
+  };
+  R.presets.addEventListener('click', e => {
+    const el = e.target.closest('[data-preset]'); if (!el || !useBoards) return;
+    if (useBoards(PRESETS[+el.dataset.preset].boards)) { renderPresets(); show(); }
+  });
+  fetch('assets/presets.json').then(r => r.json()).then(j => { PRESETS = j; renderPresets(); }).catch(() => { R.presets.innerHTML = '<p class="hint">The variations could not be loaded.</p>'; });
   const show = () => {
     window.dispatchEvent(new Event('resize'));
     const b = getBuilding();
     if (!b) { status('Loading the modules from the Assemble tab…'); setTimeout(show, 600); return; }
+    if (!b.mods.length && (B.waits = (B.waits || 0) + 1) < 30) { status('Waiting for the building on the Assemble board…'); setTimeout(show, 400); return; }   // a first visit: Assemble is still putting Variation A on the board
+    renderPresets();
     if (b.key !== B.key) { B.building = b; B.key = b.key; B.fields = B.union = null; B.sel = []; B.hover = -1; renderPairs(); schedule(0, 0); if (first) { first = false; setTimeout(() => setView('street'), 900); } }
   };
   return { show };

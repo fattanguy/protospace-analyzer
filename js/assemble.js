@@ -506,6 +506,16 @@ function buildFused() {
   A.three.callouts = callouts; A.three.links = links; A.three.placed = placed;
   applyHighlight();
 }
+/* Put a whole building on the board (from the Rationalize tab's variations): undoable, saved, rebuilt. snap: three
+   layers of { id, rot } | null. */
+export function useBoards(snap) {
+  if (!A.ready) return false;
+  pushHistory();
+  snap.forEach((b, L) => b.forEach((t, k) => { const m = t && A.modules.find(x => x.id === t.id); A.boards[L][k] = m ? { mod: m, rot: t.rot, uid: ++A.uid } : null; }));
+  A.sel = null; save(); renderBoard(); build(); return true;
+}
+/* The board as { id, rot } | null, three layers. */
+export function boardSnapshot() { return A.ready ? A.boards.map(b => b.map(t => t ? { id: t.mod.id, rot: t.rot } : null)) : null; }
 /* The building as the Rationalize tab needs it: every placed module as its voxels in the building's grid (the same
    placement the fused body uses), with where it stands on the board, and the grid ↔ world mapping. */
 export function placements() {
@@ -908,6 +918,7 @@ export function mount(root) {
   R.glb.addEventListener('click', () => new GLTFExporter().parse(A.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ.glb'), err => console.error(err), { binary: true }));
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(A.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ.obj'));
   R.stats.textContent = 'Loading the fifteen modules…';
-  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) autoArrange(7); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
-  return { show() { window.dispatchEvent(new Event('resize')); }, addModule, placements };
+  // a first visit (nothing saved) starts from Variation A, the first of the five best buildings (assets/presets.json)
+  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) fetch('assets/presets.json').then(r => r.json()).then(p => { if (!useBoards(p[0].boards)) autoArrange(7); A.history = []; }).catch(() => autoArrange(7)); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
+  return { show() { window.dispatchEvent(new Event('resize')); }, addModule, placements, useBoards, boardSnapshot };
 }
