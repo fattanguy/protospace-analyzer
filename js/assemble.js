@@ -692,7 +692,6 @@ function score() {
     ['No boss floor: workspaces on more than one level', off.length >= 2 && flat === 100],
     ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100],
     ['Every gathering room is shared', gat.length > 0 && shared === 100],
-    ['All fifteen modules placed', new Set(mods.map(m => m.t.mod.id)).size >= 15],
     ['Nothing floats', floating === 0]];
   return { total, parts, goals, floating };
 }
@@ -918,7 +917,7 @@ export function mount(root) {
   R.glb.addEventListener('click', () => new GLTFExporter().parse(A.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ.glb'), err => console.error(err), { binary: true }));
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(A.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ.obj'));
   R.stats.textContent = 'Loading the fifteen modules…';
-  // a first visit (nothing saved) starts from Variation A, the first of the five best buildings (assets/presets.json)
-  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) fetch('assets/presets.json').then(r => r.json()).then(p => { if (!useBoards(p[0].boards)) autoArrange(7); A.history = []; }).catch(() => autoArrange(7)); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
+  // a first visit (nothing saved) starts from the preset marked `start` in assets/presets.json: The block, nine modules sized for 350 people
+  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) fetch('assets/presets.json').then(r => r.json()).then(p => { if (!useBoards((p.find(x => x.start) || p[0]).boards)) autoArrange(7); A.history = []; }).catch(() => autoArrange(7)); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
   return { show() { window.dispatchEvent(new Event('resize')); }, addModule, placements, useBoards, boardSnapshot };
 }

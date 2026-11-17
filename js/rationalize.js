@@ -173,8 +173,8 @@ const slider = (key, label, min, max, step, unit, hint = '') => `<div class="xp-
 const HTML = `
 <div class="as rz">
   <aside class="xp-controls as-controls" aria-label="Rationalize controls">
-    <h2 class="eyebrow">Start from · the five best buildings</h2>
-    <p class="hint">Five arrangements that score 100 with every goal met, found by searching outward from the explainer's building. Picking one puts it on the Assemble board too (undo there brings yours back); a first visit starts from A.</p>
+    <h2 class="eyebrow">Start from · sized for 350 people</h2>
+    <p class="hint">Valve is about 350 people, so the building need not use every module: five smaller arrangements, and two of the earlier 17-module ones to compare. All score 100 with every goal met. Floor area is the plates at the default merge. Picking one puts it on the Assemble board too (undo there brings yours back).</p>
     <div class="rz-presets" data-v="presets"></div>
     <h2 class="eyebrow" style="margin-top:16px">Show the modules</h2>
     <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button><button type="button" class="btn quiet" data-mode="interior">Interior only</button></div>
@@ -219,10 +219,11 @@ const HTML = `
   </div>
 </div>`;
 
+const PEOPLE = 350;                                                               // Valve's headcount: the floor area is also given per person
 function status(t) { if (R.stats) R.stats.textContent = t; }
 function report() {
   const b = B.building, st = B.stats || {}, nP = neighbours(b.mods, b.cols).length, nO = Object.keys(S.overrides).length;
-  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
+  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates (${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
@@ -368,12 +369,14 @@ export function mount(root, { getBuilding, useBoards = null, boardSnapshot = nul
   });
   R.canvas.addEventListener('pointerleave', () => { if (B.hover >= 0) { B.hover = -1; paint(); R.tip.innerHTML = '&nbsp;'; } });
   let first = true;
-  // the five best buildings: load one onto the board; mark the one that is there now
+  // the starting points (assets/presets.json): load one onto the board; mark the one that is there now
   let PRESETS = [];
   const sameBoard = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const renderPresets = () => {
     const now = boardSnapshot ? boardSnapshot() : null;
-    R.presets.innerHTML = PRESETS.map((p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)}"><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.total} · ${p.goals}/${p.of} goals · ${p.n} modules</small></button>`).join('') || '<p class="hint">Loading…</p>';
+    const btn = (p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)} Scores ${p.total} with ${p.goals} of ${p.of} goals."><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.n} modules · ≈ ${p.area.toLocaleString()} m² · ${p.per} m² per person</small></button>`;
+    const group = g => PRESETS.map((p, i) => p.group === g ? btn(p, i) : '').join('');
+    R.presets.innerHTML = PRESETS.length ? group('350') + '<div class="rz-presets-h">The full catalogue · 17 modules</div>' + group('full') : '<p class="hint">Loading…</p>';
   };
   R.presets.addEventListener('click', e => {
     const el = e.target.closest('[data-preset]'); if (!el || !useBoards) return;
