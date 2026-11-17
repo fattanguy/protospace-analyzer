@@ -159,6 +159,7 @@ function autoArrange(seed = Date.now() % 1000) {
       if (A.boards[L][k]) continue; const [c, r] = cellOf(k);
       if (L > 0 && !A.boards[L - 1][k]) continue;                                                              // nothing floats
       if (m.use === 'lobby' && (L > 0 || !publicEdge(c, r))) continue;                                         // lobbies at ground, on a public edge
+      if (m.use === 'office' && L === 0) continue;                                                             // the ground floor is public: workspaces go upstairs
       const nb = usesAround(L, k); if (!nb.length) continue;                                                   // it must touch the building
       let sc = 0; for (const u of nb) sc += u === m.use ? -2 : 2.5;                                            // mixed: other uses beside it, its own kind kept apart
       const ng = nb.filter(u => u === 'social').length, nh = nb.filter(u => u === 'hybrid').length;
@@ -508,6 +509,49 @@ function buildFused() {
 }
 /* Put a whole building on the board (from the Rationalize tab's variations): undoable, saved, rebuilt. snap: three
    layers of { id, rot } | null. */
+/* Clusters: small assemblies made once and then merged into a building (assets/clusters.json). A public cluster is
+   lobbies, gathering rooms and hybrids on the ground, along the street; a work cluster is workspaces, gathering rooms
+   and hybrids on Levels 2 and 3. Workspaces and lobbies never share a cluster. A work cluster stands on a public one,
+   and clusters side by side merge across their seams like any neighbours. The stages are one building at six sizes:
+   a core that grows a public cluster and then a work cluster at a time, for the number of people expected. */
+let CL = null;
+const clusterBy = key => CL && CL.clusters.find(c => c.key === key);
+function stageBoards(st) {
+  const snap = [0, 1, 2].map(() => Array(SITE.cols * SITE.rows).fill(null));
+  for (const p of st.parts) for (const c of clusterBy(p.cluster).cells) snap[c.L][idx(p.c0 + c.c, 0)] = { id: c.id, rot: c.rot };
+  return snap;
+}
+const stageFor = people => CL.stages.find(s => s.people >= people) || CL.stages[CL.stages.length - 1];
+/* Where a cluster goes when it is added by hand: a public one on free ground bays of the street row, beside what is
+   there so the two merge (in the middle of the lot on an empty board); a work one on Levels 2 and 3 over ground
+   modules, where no workspace lands on a lobby if that can be had. −1 when there is no room. */
+function fitCluster(cl) {
+  const free = (L, c) => !A.boards[L][idx(c, 0)], w = cl.bays, spots = [];
+  for (let c0 = 0; c0 + w <= SITE.cols; c0++) { let ok = true; for (let i = 0; i < w && ok; i++) ok = cl.kind === 'public' ? free(0, c0 + i) : !free(0, c0 + i) && free(1, c0 + i) && free(2, c0 + i); if (ok) spots.push(c0); }
+  if (!spots.length) return -1;
+  if (cl.kind === 'work') { const onLobby = c0 => cl.cells.some(c => { const m = A.modules.find(x => x.id === c.id), under = A.boards[0][idx(c0 + c.c, 0)]; return c.L === 1 && m && m.use === 'office' && under && under.mod.use === 'lobby'; }); return spots.find(c0 => !onLobby(c0)) ?? spots[0]; }
+  if (!A.boards[0].some(Boolean)) return Math.floor((SITE.cols - w) / 2);
+  return spots.find(c0 => (c0 > 0 && !free(0, c0 - 1)) || (c0 + w < SITE.cols && !free(0, c0 + w))) ?? spots[0];
+}
+function addCluster(key) {
+  const cl = clusterBy(key); if (!cl) return 'none';
+  const there = new Set(); for (let L = 0; L < 3; L++) A.boards[L].forEach(t => { if (t) there.add(t.mod.id); });
+  if (cl.cells.some(c => there.has(c.id))) return 'there';
+  const c0 = fitCluster(cl); if (c0 < 0) return 'full';
+  pushHistory(); for (const c of cl.cells) { const m = A.modules.find(x => x.id === c.id); if (m) A.boards[c.L][idx(c0 + c.c, 0)] = { mod: m, rot: c.rot, uid: ++A.uid }; }
+  A.sel = null; A.layer = cl.kind === 'public' ? 0 : 1; renderBoard(); build(); return 'ok';
+}
+function renderClusters() {
+  if (!CL || !R.clusters) return;
+  const there = new Set(); for (let L = 0; L < 3; L++) A.boards[L].forEach(t => { if (t) there.add(t.mod.id); });
+  const chip = c => `<button type="button" class="as-cl${c.cells.every(x => there.has(x.id)) ? ' on' : ''}" data-cl="${c.key}" title="${c.note}"><b>${c.key}</b><span>${c.name}</span><small>${c.cells.map(x => x.id).join(' · ')}</small></button>`;
+  R.clusters.innerHTML = `<div class="as-clh">Public · ground floor</div>${CL.clusters.filter(c => c.kind === 'public').map(chip).join('')}<div class="as-clh">Work · Levels 2 and 3</div>${CL.clusters.filter(c => c.kind === 'work').map(chip).join('')}`;
+}
+function peopleNote(v) {
+  const st = stageFor(v), names = st.parts.map(p => p.cluster).join(' + ');
+  R.people.textContent = v; R.peopleNote.innerHTML = `<b>${st.n} modules</b>: ${names}<br>≈ ${st.area.toLocaleString('en-US')} m² of floor — room for about ${st.people} people at ${CL.perPerson} m² each`;
+}
+
 export function useBoards(snap) {
   if (!A.ready) return false;
   pushHistory();
@@ -665,6 +709,7 @@ function score() {
   const siteView = m => (faces(m) === 'S' || faces(m) === 'W') && clearTo(m.L, m.k, faces(m));
   const toSite = look.length ? 100 * look.filter(siteView).length / look.length : 100;
   const shared = gat.length ? 100 * gat.filter(m => touching(m) >= 2).length / gat.length : 100;
+  const upstairs = off.length ? 100 * off.filter(m => m.L > 0).length / off.length : 100;                 // the ground floor is the public's: the company works on Levels 2 and 3
   const floating = mods.filter(m => m.L > 0 && !A.boards[m.L - 1][m.k]).length, grounded = 100 * (1 - floating / mods.length);
   let seams = 0, facesN = 0; for (const m of mods) { seams += touching(m); facesN += m.L > 0 ? 5 : 4; }
   const compact = Math.min(100, 100 * seams / Math.max(1, facesN) * 2.2);
@@ -675,6 +720,7 @@ function score() {
     ['Work access', workAccess, 'every workspace reached through two gathering rooms, or a gathering room and a hybrid'],
     ['To the bay', toBay, 'every workspace turned to the bay (R turns a tile) with nothing between it and the water on its floor'],
     ['To the neighbours', toSite, 'every gathering room and hybrid turned to the museums (south) or the Arsht Center (west), with nothing in the way on its floor'],
+    ['Public ground', upstairs, 'the ground floor is public — lobbies, gathering rooms and hybrids; every workspace on Level 2 or 3'],
     ['No boss floor', flat, 'the workspaces spread over more than one level — Valve has no managers and no top floor'],
     ['Mixed', mixed, 'every module touching a module of another use — no block of one kind'],
     ['Shared rooms', shared, 'each gathering room touching two or more modules'],
@@ -689,6 +735,7 @@ function score() {
     ['Every workspace reached through gathering rooms', off.length > 0 && workAccess === 100],
     ['Every workspace faces the bay, view unobstructed', off.length > 0 && toBay === 100],
     ['Gathering rooms and hybrids look to the museums or the Arsht Center', look.length > 0 && toSite === 100],
+    ['Ground floor public, the company above', off.length > 0 && upstairs === 100],
     ['No boss floor: workspaces on more than one level', off.length >= 2 && flat === 100],
     ['Uses mixed, no block of one kind', withNb.length > 0 && mixed === 100],
     ['Every gathering room is shared', gat.length > 0 && shared === 100],
@@ -759,7 +806,7 @@ function renderBoard(animate = true) {
     + prs.map(x => { const [c, r] = cellOf(x.a); const cls = x.through ? ' fused' : ' wall'; const title = x.through ? 'the two modules morph into each other across the seam' : 'no mass meets: the seam stays open'; return `<i class="as-link ${x.axis}${cls}" style="--c:${c};--r:${r}" title="${title}"></i>`; }).join('');
   $$('.as-slot canvas', R.board).forEach(cv => { const k = +cv.parentElement.dataset.k, t = cv.classList.contains('below') ? below[k] : b[k]; cv.getContext('2d').drawImage(planOf(t.mod, t.rot), 0, 0); });
   if (before) glide(before);
-  renderStats(); renderScore(); save();
+  renderStats(); renderScore(); renderClusters(); save();
 }
 function renderStats() {
   const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, hybrid: 0, som: 0 }; let area = 0;
@@ -794,7 +841,14 @@ function load() { try { const j = JSON.parse(localStorage.getItem('protospace.as
 const HTML = `
 <div class="as">
   <aside class="xp-controls as-controls" aria-label="Assemble controls">
-    <h2 class="eyebrow">The modules</h2>
+    <h2 class="eyebrow">Clusters</h2>
+    <p class="hint">The building is put together from clusters, not one module at a time. A <b>public</b> cluster — lobby, gathering room, hybrid — sits on the ground along the street. A <b>work</b> cluster — workspaces, gathering rooms, a hybrid — takes Levels 2 and 3 above it. Set how many people are expected and the building extends or retracts a cluster at a time.</p>
+    <div class="xp-slider as-people"><label><span>People expected</span><b data-v="people">350</b></label><input type="range" data-v="peopleRange" min="100" max="850" step="10" value="350" aria-label="People expected"></div>
+    <p class="hint" data-v="peopleNote"></p>
+    <p class="hint">Or merge them by hand: a click adds the cluster beside or on top of what is there.</p>
+    <div class="as-clusters" data-v="clusters"></div>
+    <div class="xp-row"><button type="button" class="btn quiet" data-v="clEmpty">Empty the board</button><span class="hint" data-v="clNote"></span></div>
+    <h2 class="eyebrow" style="margin-top:16px">The modules</h2>
     <p class="hint">Drag a module onto a bay (or click it, then a bay). Pick a kind of space in the drop-down: the fifteen of the catalogue, the best in-betweens of the combination maps, and the hybrids.</p>
     <div class="as-palhead"><select data-v="cat" class="as-cat" aria-label="Kind of space"></select><span class="hint" data-v="catNote"></span></div>
     <div class="as-palette" data-v="palette"></div>
@@ -905,6 +959,11 @@ export function mount(root) {
   });
   $$('[data-layer]', root).forEach(bt => bt.addEventListener('click', () => { A.layer = +bt.dataset.layer; A.sel = null; renderBoard(false); applyHighlight(); }));
   $$('[data-view]', root).forEach(bt => bt.addEventListener('click', () => setView(bt.dataset.view)));
+  R.peopleRange.addEventListener('input', () => { if (CL) peopleNote(+R.peopleRange.value); });
+  R.peopleRange.addEventListener('change', () => { if (!CL || !A.ready) return; try { localStorage.setItem('protospace.people', R.peopleRange.value); } catch (e) { /* private window */ } useBoards(stageBoards(stageFor(+R.peopleRange.value))); R.clNote.textContent = ''; });
+  R.clusters.addEventListener('click', e => { const b = e.target.closest('[data-cl]'); if (!b || !A.ready) return; const r = addCluster(b.dataset.cl); R.clNote.textContent = r === 'there' ? 'Already in the building.' : r === 'full' ? (clusterBy(b.dataset.cl).kind === 'work' ? 'No free ground cluster to stand on.' : 'No room left on the street.') : ''; });
+  R.clEmpty.addEventListener('click', () => { pushHistory(); for (let i = 0; i < 3; i++) clearLayer(i); A.sel = null; A.layer = 0; renderBoard(); build(); R.clNote.textContent = ''; });
+  fetch('assets/clusters.json', { cache: 'no-cache' }).then(r => r.json()).then(j => { CL = j; let v = 350; try { v = +localStorage.getItem('protospace.people') || 350; } catch (e) { /* private window */ } R.peopleRange.value = v; peopleNote(v); renderClusters(); }).catch(() => { R.peopleNote.textContent = 'The clusters could not be loaded.'; });
   R.auto.addEventListener('click', () => { pushHistory(); autoArrange(); });
   R.shuffle.addEventListener('click', () => scramble(A.layer));
   R.clear.addEventListener('click', () => { pushHistory(); clearLayer(A.layer); A.sel = null; renderBoard(); build(); });
