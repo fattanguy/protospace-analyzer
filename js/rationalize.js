@@ -370,19 +370,20 @@ export function mount(root, { getBuilding, useBoards = null, boardSnapshot = nul
   R.canvas.addEventListener('pointerleave', () => { if (B.hover >= 0) { B.hover = -1; paint(); R.tip.innerHTML = '&nbsp;'; } });
   let first = true;
   // the starting points (assets/presets.json): load one onto the board; mark the one that is there now
+  // (/assets is served with a day's cache, so the list is always revalidated: a stale copy once left the list empty)
   let PRESETS = [];
   const sameBoard = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const renderPresets = () => {
     const now = boardSnapshot ? boardSnapshot() : null;
-    const btn = (p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)} Scores ${p.total} with ${p.goals} of ${p.of} goals."><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.n} modules · ≈ ${p.area.toLocaleString()} m² · ${p.per} m² per person</small></button>`;
-    const group = g => PRESETS.map((p, i) => p.group === g ? btn(p, i) : '').join('');
+    const btn = (p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)} Scores ${p.total} with ${p.goals} of ${p.of} goals."><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.n} modules${p.area ? ` · ≈ ${p.area.toLocaleString()} m² · ${p.per} m² per person` : ''}</small></button>`;
+    const group = g => PRESETS.map((p, i) => (p.group || '350') === g ? btn(p, i) : '').join('');
     R.presets.innerHTML = PRESETS.length ? group('350') + '<div class="rz-presets-h">The full catalogue · 17 modules</div>' + group('full') : '<p class="hint">Loading…</p>';
   };
   R.presets.addEventListener('click', e => {
     const el = e.target.closest('[data-preset]'); if (!el || !useBoards) return;
     if (useBoards(PRESETS[+el.dataset.preset].boards)) { renderPresets(); show(); }
   });
-  fetch('assets/presets.json').then(r => r.json()).then(j => { PRESETS = j; renderPresets(); }).catch(() => { R.presets.innerHTML = '<p class="hint">The variations could not be loaded.</p>'; });
+  fetch('assets/presets.json', { cache: 'no-cache' }).then(r => r.json()).then(j => { PRESETS = j; renderPresets(); }).catch(() => { R.presets.innerHTML = '<p class="hint">The variations could not be loaded.</p>'; });
   const show = () => {
     window.dispatchEvent(new Event('resize'));
     const b = getBuilding();

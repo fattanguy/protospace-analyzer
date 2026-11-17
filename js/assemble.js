@@ -918,6 +918,6 @@ export function mount(root) {
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(A.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ.obj'));
   R.stats.textContent = 'Loading the fifteen modules…';
   // a first visit (nothing saved) starts from the preset marked `start` in assets/presets.json: The block, nine modules sized for 350 people
-  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) fetch('assets/presets.json').then(r => r.json()).then(p => { if (!useBoards((p.find(x => x.start) || p[0]).boards)) autoArrange(7); A.history = []; }).catch(() => autoArrange(7)); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
+  loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) fetch('assets/presets.json', { cache: 'no-cache' }).then(r => r.json()).then(p => { if (!useBoards((p.find(x => x.start) || p[0]).boards)) autoArrange(7); A.history = []; }).catch(() => autoArrange(7)); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
   return { show() { window.dispatchEvent(new Event('resize')); }, addModule, placements, useBoards, boardSnapshot };
 }
