@@ -173,8 +173,8 @@ const slider = (key, label, min, max, step, unit, hint = '') => `<div class="xp-
 const HTML = `
 <div class="as rz">
   <aside class="xp-controls as-controls" aria-label="Rationalize controls">
-    <h2 class="eyebrow">Start from · the building at six sizes</h2>
-    <p class="hint">The same building extended or retracted a cluster at a time for the people expected (the slider in the Assemble tab): public clusters on the ground, work clusters on Levels 2 and 3. Each scores 100 with every goal met; floor area is the plates at the default merge, at 20 m² a person. Picking one puts it on the Assemble board too (undo there brings yours back).</p>
+    <h2 class="eyebrow">Start from · sized for 350 people</h2>
+    <p class="hint">Valve is about 350 people, so the building need not use every module: five smaller arrangements, and two of the earlier 17-module ones to compare. All score 100 with every goal met. Floor area is the plates at the default merge. Picking one puts it on the Assemble board too (undo there brings yours back).</p>
     <div class="rz-presets" data-v="presets"></div>
     <h2 class="eyebrow" style="margin-top:16px">Show the modules</h2>
     <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button><button type="button" class="btn quiet" data-mode="interior">Interior only</button></div>
@@ -375,8 +375,9 @@ export function mount(root, { getBuilding, useBoards = null, boardSnapshot = nul
   const sameBoard = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const renderPresets = () => {
     const now = boardSnapshot ? boardSnapshot() : null;
-    const btn = (p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)} Scores ${p.total} with ${p.goals} of ${p.of} goals."><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${esc(p.clusters || '')} · ${p.n} modules · ≈ ${p.area.toLocaleString()} m²</small></button>`;
-    R.presets.innerHTML = PRESETS.length ? PRESETS.map(btn).join('') : '<p class="hint">Loading…</p>';
+    const btn = (p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)} Scores ${p.total} with ${p.goals} of ${p.of} goals."><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.n} modules${p.area ? ` · ≈ ${p.area.toLocaleString()} m² · ${p.per} m² per person` : ''}</small></button>`;
+    const group = g => PRESETS.map((p, i) => (p.group || '350') === g ? btn(p, i) : '').join('');
+    R.presets.innerHTML = PRESETS.length ? group('350') + '<div class="rz-presets-h">The full catalogue · 17 modules</div>' + group('full') : '<p class="hint">Loading…</p>';
   };
   R.presets.addEventListener('click', e => {
     const el = e.target.closest('[data-preset]'); if (!el || !useBoards) return;
