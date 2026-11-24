@@ -1,10 +1,11 @@
-/* ProtoSpace Analyzer — the ground storey that folds (Rationalize tab).
+/* ProtoSpace Analyzer — the public floor that folds (Rationalize tab).
 
-   The ground storey of the building is the public's, and its modules — the lobbies, the gathering rooms, the hybrids —
-   fold into each other to clear the floor, and unfold again to make the rooms.
+   The ground of the building is the public's, and the foot of its ground modules — the lobbies, the gathering rooms,
+   the hybrids — folds into itself to clear the floor, and unfolds again to make the rooms.
 
-   To do that every ground module is redrawn as a vault: its own silhouette, seen along the building, swept the length
-   of its bay. A vault is open at both ends and stands on its two long walls, which run on rails: there are no columns
+   Only the lowest storeys of the ground modules do this (two by default: the line is `yFold`); what is above them
+   stays in the merged body, with its floors. To do it the foot of every ground module is redrawn as a vault: the
+   module's own silhouette, seen along the building, pressed down under that line and swept the length of its bay. A vault is open at both ends and stands on its two long walls, which run on rails: there are no columns
    on the public floor, the walls of the vaults carry everything.
 
    A vault keeps its skin only near the mass of the module it was drawn from: where the module is open, the vault is
@@ -14,13 +15,13 @@
    One or two vaults in every row do not move. They are the garages: the other vaults slide along the rails into the
    nearer garage and nest there, each one inside the one before. So that they can, a vault is trimmed to fit inside the
    one it slides into (a wall's thickness and a hand's width smaller all round) — the nearer to its garage, the larger.
-   The garages stand under the levels above and carry them on a wall across each of their two ends, which the sliding
+   The garages stand under the rest of the building and carry it on a wall across each of their two ends, which the sliding
    vaults pass through.
 
    Unfolded: one vault to a bay, the rooms opening into each other end to end.
    Folded: the vaults nested in their garages, the rest of the deck open.
 
-   planRails(b, fields, { yBase, H, tf })  → the plan (or null when nothing stands on the ground layer)
+   planRails(b, fields, { yBase, H, tf, yFold })  → the plan (or null when nothing stands on the ground layer)
    buildRails(plan, mats)                 → a THREE.Group: the deck, the rails, the vaults, the garage walls
    moveBlocks(group, s)                   → the vaults at s = 0 (unfolded) … 1 (folded) */
 import * as THREE from 'three';
@@ -51,11 +52,12 @@ function blur2(a, W, H, passes) {
   return s;
 }
 
-export function planRails(b, fields, { yBase, H, tf, vor = null }) {
+export function planRails(b, fields, { yBase, H, tf, yFold = Infinity, vor = null }) {
   const site = b.site, ground = b.mods.map((m, i) => ({ m, i })).filter(q => q.m.L === 0); if (!ground.length || !site || !fields) return null;
-  const yDeck = yBase + tf, yTop = (b.PODIUM_V + b.PITCH_V) * b.LAT, LAT = b.LAT;      // the deck's top · the underside of the level above
+  const yDeck = yBase + tf, yTop = Math.min((b.PODIUM_V + b.PITCH_V) * b.LAT, yFold), LAT = b.LAT;      // the deck's top · the underside of what stays above: the level above, or the ground modules' own upper storeys
   const z0w = -b.gridZ(0), dzw = -(b.gridZ(1) - b.gridZ(0)), y0w = b.gridY(0), dyw = b.gridY(1) - b.gridY(0);   // lattice → depth from the street edge, height
   const pitchX = site.slotX + site.gapX, pitchZ = site.slotZ + site.gapZ, h = STEP, PADY = 4;
+  const yRoom = yDeck + ROOM, squash = Math.min(1, Math.max(0, (yTop - GAP - yRoom) / ((b.PODIUM_V + b.PITCH_V) * b.LAT - GAP - yRoom)));   // a module's roofline above a room's height is pressed into what the part that folds leaves: 1 when the whole ground level folds
   const rows = [], decks = [], rails = [], vaults = [], ribs = [];
   for (const r of [...new Set(ground.map(q => q.m.r))].sort()) {
     const here = ground.filter(q => q.m.r === r).sort((a, c) => a.m.c - c.m.c), n = here.length;
@@ -73,7 +75,8 @@ export function planRails(b, fields, { yBase, H, tf, vor = null }) {
       for (let k = 0; k < W; k++) {
         const gz = (dA + k * h - z0w) / dzw - F.z0; if (gz < 0 || gz > F.nz - 1) continue; const zi = Math.min(F.nz - 2, Math.floor(gz)), tz = gz - zi;
         if (!hz[zi] && !hz[zi + 1]) continue;
-        const top = Math.max(hz[zi] * (1 - tz) + hz[zi + 1] * tz, hz[zi] && hz[zi + 1] ? 0 : Math.max(hz[zi], hz[zi + 1]), yDeck + ROOM);
+        const raw = Math.max(hz[zi] * (1 - tz) + hz[zi + 1] * tz, hz[zi] && hz[zi + 1] ? 0 : Math.max(hz[zi], hz[zi + 1]), yRoom);
+        const top = Math.min(yRoom + (raw - yRoom) * squash, yTop - GAP);          // the module's own skyline, pressed under what stays above, a hand's width clear of it
         for (let j = deckRow; j < Hh && yA + j * h <= top; j++) occ[k + W * j] = 1;
       }
       const soft = blur2(occ, W, Hh, 8), mask = new Uint8Array(W * Hh);
@@ -105,7 +108,7 @@ export function planRails(b, fields, { yBase, H, tf, vor = null }) {
   }
   const hall = rows.reduce((a, q) => a + (q.xb - q.xa) * (q.dE - q.dW), 0), gar = vaults.filter(v => v.garage), room = v => v.L * Math.max(0, v.d1 - v.d0 - 2 * WALL);
   return { yBase, yDeck, yTop, tf, h, vor, rows, decks, rails, vaults, ribs, map: { x0w: b.gridX(0), dxw: b.gridX(1) - b.gridX(0), y0w, dyw, z0w, dzw },
-    stats: { hall, open: hall - gar.reduce((a, v) => a + v.L * (v.d1 - v.d0), 0), rooms: vaults.length, roomArea: vaults.reduce((a, v) => a + room(v), 0), garages: gar.map(v => v.id), sliding: vaults.length - gar.length, length: Math.max(...rows.map(q => q.xb - q.xa)), depth: rows[0].dE - rows[0].dW } };
+    stats: { hall, height: yTop - yBase, storeys: Math.round((yTop - yBase) / H), open: hall - gar.reduce((a, v) => a + v.L * (v.d1 - v.d0), 0), rooms: vaults.length, roomArea: vaults.reduce((a, v) => a + room(v), 0), garages: gar.map(v => v.id), sliding: vaults.length - gar.length, length: Math.max(...rows.map(q => q.xb - q.xa)), depth: rows[0].dE - rows[0].dW } };
 }
 
 /* A field on a box of the world, sampled every `h` and meshed. fn(x, y, depth) → metres, negative inside. */
@@ -120,7 +123,7 @@ function meshOf(fn, x0, x1, y0, y1, d0, d1, h, smooth = 2) {
 }
 
 export function buildRails(plan, mats) {
-  const group = new THREE.Group(); group.name = 'Valve HQ · the ground storey that folds';
+  const group = new THREE.Group(); group.name = 'Valve HQ · the public floor that folds';
   const { yBase, yDeck, yTop, tf, h } = plan, moving = [], mp = plan.map;
   const massOf = F => (x, y, d) => {                                                 // the module's own signed distance (m) at a point of the world
     const gx = Math.min(F.nx - 1.001, Math.max(0, (x - mp.x0w) / mp.dxw - F.x0)), gy = Math.min(F.ny - 1.001, Math.max(0, (y - mp.y0w) / mp.dyw - F.y0)), gz = Math.min(F.nz - 1.001, Math.max(0, (d - mp.z0w) / mp.dzw - F.z0));

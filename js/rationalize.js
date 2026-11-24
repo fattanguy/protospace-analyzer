@@ -20,7 +20,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 3, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, fold: 2, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 3, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
@@ -72,11 +72,15 @@ async function run() {
 }
 function makeMeshes() {
   const b = B.building, s = S.res, yOf = gy => b.gridY(gy);                              // the same mapping as the mesh
-  /* The ground storey that folds (js/rails.js): the ground modules leave the merged body and stand under it as vaults on
-     rails; the body is then the union of the levels above alone (the ground modules' fields pushed far away, so every
-     module keeps its number). */
+  /* The public floor that folds (js/rails.js): the lowest storeys of the ground modules — S.fold of them, two by default —
+     leave the merged body and stand under it as vaults on rails. The body is then the union of everything above that
+     line: the ground modules' fields are cut off below it (so every module keeps its number and its upper storeys). */
   const folds = S.rails && hollow() && S.floors && b.mods.some(m => m.L === 0) && b.mods.some(m => m.L > 0);
-  if (folds && !B.unionUp) B.unionUp = unionField(B.fields.map((F, i) => b.mods[i].L === 0 ? { ...F, d: new Float32Array(F.d.length).fill(1e3) } : F), 4, kFor);
+  const yFold = b.PODIUM_V * b.LAT + Math.min(4, Math.max(2, Math.round(S.fold || 2))) * S.H;   // the underside of what stays: the top of the storeys that fold (m)
+  if (folds && (!B.unionUp || B.foldAt !== yFold)) {
+    const above = F => { const d = new Float32Array(F.d.length); let o = 0; for (let z = 0; z < F.nz; z++) for (let y = 0; y < F.ny; y++) { const lift = yFold - b.gridY(F.y0 + y); for (let x = 0; x < F.nx; x++, o++) d[o] = Math.max(F.d[o], lift); } return { ...F, d }; };
+    B.unionUp = unionField(B.fields.map((F, i) => b.mods[i].L === 0 ? above(F) : F), 4, kFor); B.foldAt = yFold;
+  }
   const U = folds ? B.unionUp : B.union;
   clearMeshes();
   const toWorld = (pos, fine) => {
@@ -86,7 +90,7 @@ function makeMeshes() {
   const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = S.tf, yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
   B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
   const vor = { style: S.winStyle, cell: S.vor, jit: 0.35 + 0.65 * S.winVar, rib: Math.max(0.38, 0.6 * step), closed: 0.22 };   // the Voronoi web: cell size, how irregular, half a rib, the share of cells left closed
-  const rails = folds ? planRails(b, B.fields, { yBase, H: S.H, tf, vor: S.windows && S.winStyle === 'voronoi' ? vor : null }) : null; B.rails = null;
+  const rails = folds ? planRails(b, B.fields, { yBase, H: S.H, tf, yFold, vor: S.windows && S.winStyle === 'voronoi' ? vor : null }) : null; B.rails = null;
   const mesh = (kind, mat) => {
     const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar, ...vor } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
@@ -191,8 +195,9 @@ const HTML = `
     <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button><button type="button" class="btn quiet" data-mode="interior">Interior only</button></div>
     <p class="hint" data-v="modeNote"></p>
     <h2 class="eyebrow" style="margin-top:16px">The public floor</h2>
-    <label class="chk"><input type="checkbox" data-c="rails"> A ground storey that folds: the ground modules as vaults on rails that slide into each other</label>
-    ${slider('rail', 'Ground modules · unfolded ↔ folded', 0, 100, 1, '%', 'Unfolded: one vault to a bay, the rooms opening into each other. Folded: the red vaults slide along their rails into the two that stay, nest there, and leave the rest of the deck open. The two that stay carry the levels above.')}
+    <label class="chk"><input type="checkbox" data-c="rails"> A public floor that folds: the lowest storeys of the ground modules as vaults on rails that slide into each other</label>
+    ${slider('fold', 'The part that folds', 2, 4, 1, '', 'How many storeys of the ground modules slide: two keeps the lobbies and the gathering rooms on the ground as double-height halls on rails, and leaves the storeys above them in the building. Four is the whole ground level.')}
+    ${slider('rail', 'Ground modules · unfolded ↔ folded', 0, 100, 1, '%', 'Unfolded: one vault to a bay, the rooms opening into each other. Folded: the red vaults slide along their rails into the two that stay, nest there, and leave the rest of the deck open. The two that stay carry everything above.')}
     <h2 class="eyebrow" style="margin-top:16px">Merging</h2>
     ${slider('k', 'Merge · every pair', 0, KMAX, 0.25, 'm', 'How far the modules reach for each other: 0 keeps them apart across their 0.9 m seams; a few metres grows a fillet between neighbours until they read as one mass, and their rooms open into each other.')}
     <div class="rz-pair" data-v="pair"></div>
@@ -239,18 +244,18 @@ const SQFT = 10.7639, PEOPLE = 350;                                             
 function status(t) { if (R.stats) R.stats.textContent = t; }
 function report() {
   const b = B.building, st = B.stats || {}, nP = neighbours(b.mods, b.cols).length, nO = Object.keys(S.overrides).length;
-  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates${st.rails ? ' on the levels above' : ''} (${(Math.round(st.floorArea * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(st.floorArea * SQFT / PEOPLE)} sq ft, ${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (st.rails ? ` · the ground storey folds: ${st.rails.rooms} vaults on a deck of ${Math.round(st.rails.hall).toLocaleString()} m² (${(Math.round(st.rails.hall * SQFT / 100) * 100).toLocaleString()} sq ft), ${st.rails.sliding} of them sliding into ${st.rails.garages.join(' and ')}; ${S.rail >= 100 ? `folded, ${Math.round(st.rails.open).toLocaleString()} m² (${(Math.round(st.rails.open * SQFT / 100) * 100).toLocaleString()} sq ft) of the deck is open` : S.rail <= 0 ? `unfolded, ${Math.round(st.rails.roomArea).toLocaleString()} m² (${(Math.round(st.rails.roomArea * SQFT / 100) * 100).toLocaleString()} sq ft) of public rooms` : 'on their way'}` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
+  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates${st.rails ? ' above the part that folds' : ''} (${(Math.round(st.floorArea * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(st.floorArea * SQFT / PEOPLE)} sq ft, ${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (st.rails ? ` · the first ${st.rails.storeys} storeys of the ground modules fold (${st.rails.height.toFixed(1)} m): ${st.rails.rooms} vaults on a deck of ${Math.round(st.rails.hall).toLocaleString()} m² (${(Math.round(st.rails.hall * SQFT / 100) * 100).toLocaleString()} sq ft), ${st.rails.sliding} of them sliding into ${st.rails.garages.join(' and ')}; ${S.rail >= 100 ? `folded, ${Math.round(st.rails.open).toLocaleString()} m² (${(Math.round(st.rails.open * SQFT / 100) * 100).toLocaleString()} sq ft) of the deck is open` : S.rail <= 0 ? `unfolded, ${Math.round(st.rails.roomArea).toLocaleString()} m² (${(Math.round(st.rails.roomArea * SQFT / 100) * 100).toLocaleString()} sq ft) of public rooms` : 'on their way'}` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
-  $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'rail' ? (v <= 0 ? 'unfolded' : v >= 100 ? 'folded' : `${v} %`) : k === 'winVar' ? (v <= 0 ? 'none' : `${Math.round(v * 100)} %`) : k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
+  $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'fold' ? `${v} storeys · ${(v * S.H).toFixed(1)} m` : k === 'rail' ? (v <= 0 ? 'unfolded' : v >= 100 ? 'folded' : `${v} %`) : k === 'winVar' ? (v <= 0 ? 'none' : `${Math.round(v * 100)} %`) : k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
   $$('[data-c]', R.root).forEach(x => { x.checked = !!S[x.dataset.c]; });
   $$('[data-res]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.res === S.res));
   $$('[data-win]', R.root).forEach(x => { x.classList.toggle('on', x.dataset.win === S.winStyle); x.disabled = S.view === 'interior' || !S.windows; }); R.root.querySelector('[data-s=vor]').disabled = S.view === 'interior' || !S.windows || S.winStyle !== 'voronoi';
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
   R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The building as it looks from outside: the merged modules with their walls, opaque.';
   for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors;
-  R.root.querySelector('[data-c=rails]').disabled = !S.floors; R.root.querySelector('[data-s=rail]').disabled = !S.floors || !S.rails;
+  R.root.querySelector('[data-c=rails]').disabled = !S.floors; R.root.querySelector('[data-s=rail]').disabled = R.root.querySelector('[data-s=fold]').disabled = !S.floors || !S.rails;
   R.root.querySelector('[data-c=windows]').disabled = S.view === 'interior'; R.root.querySelector('[data-s=winVar]').disabled = S.view === 'interior' || !S.windows;
   R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
   R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = R.root.querySelector('[data-s=tf]').disabled = !hollow() || !S.floors;
@@ -349,7 +354,7 @@ export function mount(root, { getBuilding, useBoards = null, boardSnapshot = nul
   root.innerHTML = HTML; R = { root }; $$('[data-v]', root).forEach(el => { R[el.dataset.v] = el; });
   initThree(R.canvas); syncControls();
   // sliders and switches: each one re-runs only the stage it changes
-  const STAGE = { k: 1, t: 2, H: 2, tf: 2, winVar: 2, vor: 2, soft: 0 };
+  const STAGE = { k: 1, t: 2, H: 2, tf: 2, winVar: 2, vor: 2, fold: 2, soft: 0 };
   $$('[data-s]', root).forEach(x => x.addEventListener('input', () => {
     const k = x.dataset.s; S[k] = +x.value; syncControls(); save();
     if (k === 'opacity') applyLook(); else if (/^cut/.test(k)) applyCuts(); else if (k === 'rail') { if (B.rails) moveBlocks(B.rails, S.rail / 100); report(); } else { if (k === 'k') renderPairs(); schedule(STAGE[k], 220); }
