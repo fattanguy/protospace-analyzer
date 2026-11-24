@@ -3,10 +3,10 @@
 
    The site: 100 × 250 m, long side north–south, Biscayne Bay along the east edge, Herald Plaza and the street along
    the west, causeways north and south. The ground floods (Irma put ~1.5 m of surge in the streets), so the ground
-   layer stands on pilotis 3 m up and the levels above hold the cabals; lobbies make the public edge on the west,
+   layer stands on pilotis 2.7 m up and the levels above hold the cabals; lobbies make the public edge on the west,
    offices the cabal floors, gathering spaces the rooms for the whole company; one red stair ties it all together.
 
-   Plan game: the lot is a board of 7 × 3 slots (one module bay each, 31 × 31 m, with a 1 m seam between bays).
+   Plan game: the lot is a board of 7 × 3 slots (one module bay each, 27 × 27 m, with a 0.9 m seam between bays).
    Modules are tiles — their roof plans — that slide into empty slots; a tile can be turned; the board has three layers
    (ground, level 2, level 3). The 3D building follows the board, fused into one surface: across every seam the two
    neighbours morph into each other (js/fuse.js), a core rises wherever modules stack, and the red stair. A module can
@@ -28,11 +28,14 @@ const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [..
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 // ------------------------------------------------------------------ the site and the board
-const N = 32, LAT = 31 / 30, SLOT_V = 30, GAP_V = 1, PITCH_V = 20, PODIUM_V = 3, MARGIN_V = 4;   // lattice · metres per voxel · bay, seam (1 m), layer pitch (a 1 m gap over a full-height module), pilotis, grid margin (voxels)
+/* The scale of the building: metres per lattice cell. 0.9 m makes a bay 27 m, a level 18 m (four storeys of 4.5 m) and the
+   pilotis 2.7 m: the stepped building then holds about 6,700 m² (72,000 sq ft) of floor, some 200 sq ft for each of
+   Valve's 350 people. Until 24 Nov 2026 it was 31 / 30 (31 m bays, five storeys a level, 11,700 m²). */
+const N = 32, LAT = 0.9, SLOT_V = 30, GAP_V = 1, PITCH_V = 20, PODIUM_V = 3, MARGIN_V = 4;   // lattice · metres per voxel · bay, seam (one cell), layer pitch (one cell over a full-height module), pilotis, grid margin (voxels)
 export const SITE = { length: 250, width: 100, cols: 7, rows: 3, slotX: SLOT_V * LAT, slotZ: SLOT_V * LAT, gapX: GAP_V * LAT, gapZ: GAP_V * LAT };   // x runs north → south, z runs west → east (negative)
 SITE.boardX = SITE.cols * SITE.slotX + (SITE.cols - 1) * SITE.gapX; SITE.boardZ = SITE.rows * SITE.slotZ + (SITE.rows - 1) * SITE.gapZ;
 SITE.x0 = (SITE.length - SITE.boardX) / 2; SITE.z0 = (SITE.width - SITE.boardZ) / 2;                                   // the board sits centred on the lot
-const PODIUM = PODIUM_V * LAT, PITCH = PITCH_V * LAT, MOD_H = 19;                                                          // pilotis height · layer pitch · module height (m)
+const PODIUM = PODIUM_V * LAT, PITCH = PITCH_V * LAT, MOD_H = 18.4 * LAT;                                                          // pilotis height · layer pitch · module height (m)
 const LAYERS = ['Ground · on pilotis', 'Level 2', 'Level 3'];
 const USE = { lobby: { name: 'Lobby', c: '#6d8f98' }, office: { name: 'Office', c: '#c0994f' }, social: { name: 'Gathering', c: '#b4584a' }, hybrid: { name: 'Hybrid', c: '#8e6f9b' }, som: { name: 'Explorer tile', c: '#7b7aa3' } };
 const CATS = [['lobby', 'Lobbies'], ['office', 'Workspaces'], ['social', 'Gathering'], ['hybrid', 'Hybrid spaces'], ['som', 'From the Explorer']];   // the palette's drop-down
@@ -467,7 +470,7 @@ function buildFused() {
   // ground to a bulkhead over the top roof, and the surface flows around it; the first is the red stair
   let coreCount = 0;
   if (A.opts.cores && placed.length) stacks().forEach((st, i) => {
-    const [c, r] = cellOf(st.k), { gx0, gz0 } = gridBase(c, r, 0), x0 = gx0 - 1 - OX, z0 = gz0 - 1 - OZ, W = 6, D = 5;
+    const [c, r] = cellOf(st.k), { gx0, gz0 } = gridBase(c, r, 0), x0 = gx0 - 1 - OX, z0 = gz0 - 1 - OZ, W = Math.round(6.2 / LAT), D = Math.round(5.2 / LAT);   // a 6.2 × 5.2 m core, whatever the scale
     const colN = new Int32Array(SLOT_V * SLOT_V), colTop = new Int32Array(SLOT_V * SLOT_V);                  // solid per column of the bay, and its top
     for (let dz = 0; dz < SLOT_V; dz++) for (let dx = 0; dx < SLOT_V; dx++) {
       const x = x0 + dx, z = z0 + dz; if (x < 0 || z < 0 || x >= DX || z >= DZ) continue; let n = 0, top = -1;
@@ -682,7 +685,7 @@ function score() {
     ['Compact', compact, 'modules touching, not scattered']];
   const total = Math.round(parts.reduce((s, p) => s + p[1], 0) / parts.length);
   const goals = [
-    ['Ground floor raised 3 m above the flood (pilotis)', true],
+    ['Ground floor raised 2.7 m above the flood (pilotis)', true],
     ['One connected building', g.groups === 1],
     ['Every lobby on a public edge', lob.length > 0 && street === 100],
     ['Every lobby joins a gathering room or a hybrid', lob.length > 0 && lobbyLinks === 100],
@@ -765,7 +768,7 @@ function renderStats() {
   const g = connectedGroups(), uses = { lobby: 0, office: 0, social: 0, hybrid: 0, som: 0 }; let area = 0;
   for (let l = 0; l < 3; l++) A.boards[l].forEach(t => { if (!t) return; uses[t.mod.use]++; area += t.mod.an.floors.length * LAT * LAT; });
   const hint = g.modules ? (g.groups === 1 ? 'Every module is reachable — the seams and cores join them all.' : `${g.groups} separate groups: slide a module beside another, or stack one, to join them.`) : 'Drag a module from the palette onto a bay, or click one then click a bay.';
-  R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of floor · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.hybrid ? ` · ${uses.hybrid} hybrid` : ''}${uses.som ? ` · ${uses.som} from the Explorer` : ''}<br><span class="hint">${hint}</span>`;
+  R.stats.innerHTML = `<b>${g.modules}</b> modules · <b>${Math.round(area).toLocaleString('en-US')}</b> m² of level surface in the modules · ${uses.lobby} lobby · ${uses.office} office · ${uses.social} gathering${uses.hybrid ? ` · ${uses.hybrid} hybrid` : ''}${uses.som ? ` · ${uses.som} from the Explorer` : ''}<br><span class="hint">${hint}</span>`;
 }
 function renderCallouts() {
   const cs = A.three && A.three.callouts || [];
@@ -813,7 +816,7 @@ const HTML = `
     <div class="as-boardwrap">
       <div class="as-edge top"><span>Herald Plaza · street · access from the west · the Arsht Center beyond</span><span class="seg" role="group" aria-label="Layer">${LAYERS.map((l, i) => `<button type="button" data-layer="${i}"${i === 0 ? ' class="on"' : ''}>${l.split(' ·')[0]}</button>`).join('')}</span></div>
       <div class="as-boardrow"><div class="as-edge left">N · Venetian Causeway</div><div class="as-board" data-v="board" style="--cols:${SITE.cols};--rows:${SITE.rows}" tabindex="0" aria-label="Plan board"></div><div class="as-edge right">S · MacArthur Causeway · Museum Park, PAMM, Frost beyond</div></div>
-      <div class="as-edge bottom"><span>Biscayne Bay · surge from the east · the ground floods, so the ground floor stands 3 m up on pilotis · workspaces face the water</span></div>
+      <div class="as-edge bottom"><span>Biscayne Bay · surge from the east · the ground floods, so the ground floor stands 2.7 m up on pilotis · workspaces face the water</span></div>
     </div>
     <div class="as-under"><p class="status" data-v="stats"></p><div class="as-score" data-v="score"></div></div>
     <div class="as-viewer"><canvas data-v="canvas" aria-label="The building in 3D"></canvas><div class="as-compass">drag to orbit · scroll to zoom · <button type="button" data-view="street">street</button> <button type="button" data-view="bay">bay</button> <button type="button" data-view="aerial">aerial</button> <button type="button" data-view="plan">plan</button></div></div>

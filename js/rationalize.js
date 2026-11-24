@@ -19,13 +19,14 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.13, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.5, rev: 2, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
 let R = {};
 
-function load() { try { const j = JSON.parse(localStorage.getItem('protospace.rationalize') || 'null'); return { ...DEF, ...(j || {}), overrides: { ...((j && j.overrides) || {}) } }; } catch (e) { return { ...DEF, overrides: {} }; } }
+function load() { try { const j = JSON.parse(localStorage.getItem('protospace.rationalize') || 'null'); if (j && j.rev !== DEF.rev) { delete j.H; j.rev = DEF.rev; }   /* rev 2: the building at 0.9 m a cell, four 4.5 m storeys a level — a storey height kept from before no longer fits */
+  return { ...DEF, ...(j || {}), overrides: { ...((j && j.overrides) || {}) } }; } catch (e) { return { ...DEF, overrides: {} }; } }
 function save() { try { localStorage.setItem('protospace.rationalize', JSON.stringify(S)); } catch (e) {} }
 
 // ------------------------------------------------------------------ the modules and their pairs
@@ -180,7 +181,7 @@ const HTML = `
     <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button><button type="button" class="btn quiet" data-mode="interior">Interior only</button></div>
     <p class="hint" data-v="modeNote"></p>
     <h2 class="eyebrow" style="margin-top:16px">Merging</h2>
-    ${slider('k', 'Merge · every pair', 0, KMAX, 0.25, 'm', 'How far the modules reach for each other: 0 keeps them apart across their 1 m seams; a few metres grows a fillet between neighbours until they read as one mass, and their rooms open into each other.')}
+    ${slider('k', 'Merge · every pair', 0, KMAX, 0.25, 'm', 'How far the modules reach for each other: 0 keeps them apart across their 0.9 m seams; a few metres grows a fillet between neighbours until they read as one mass, and their rooms open into each other.')}
     <div class="rz-pair" data-v="pair"></div>
     <h2 class="eyebrow" style="margin-top:16px">Pairs</h2>
     <p class="hint">Click a module in the view, then a second one, to set how much those two merge. Or pick a pair here.</p>
@@ -219,11 +220,11 @@ const HTML = `
   </div>
 </div>`;
 
-const PEOPLE = 350;                                                               // Valve's headcount: the floor area is also given per person
+const SQFT = 10.7639, PEOPLE = 350;                                                               // Valve's headcount: the floor area is also given per person
 function status(t) { if (R.stats) R.stats.textContent = t; }
 function report() {
   const b = B.building, st = B.stats || {}, nP = neighbours(b.mods, b.cols).length, nO = Object.keys(S.overrides).length;
-  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates (${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
+  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates (${(Math.round(st.floorArea * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(st.floorArea * SQFT / PEOPLE)} sq ft, ${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
@@ -375,7 +376,7 @@ export function mount(root, { getBuilding, useBoards = null, boardSnapshot = nul
   const sameBoard = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const renderPresets = () => {
     const now = boardSnapshot ? boardSnapshot() : null;
-    const btn = (p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)} Scores ${p.total} with ${p.goals} of ${p.of} goals."><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.n} modules${p.area ? ` · ≈ ${p.area.toLocaleString()} m² · ${p.per} m² per person` : ''}</small></button>`;
+    const btn = (p, i) => `<button type="button" class="rz-preset${now && sameBoard(now, p.boards) ? ' on' : ''}" data-preset="${i}" title="${esc(p.note)} Scores ${p.total} with ${p.goals} of ${p.of} goals."><b>${esc(p.key)}</b><span>${esc(p.name)}</span><small>${p.n} modules${p.area ? ` · ≈ ${p.area.toLocaleString()} m² · ${(Math.round(p.area * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(p.area * SQFT / PEOPLE)} sq ft per person` : ''}</small></button>`;
     const group = g => PRESETS.map((p, i) => (p.group || '350') === g ? btn(p, i) : '').join('');
     R.presets.innerHTML = PRESETS.length ? group('350') + (PRESETS.some(p => p.group === 'full') ? '<div class="rz-presets-h">The full catalogue · 17 modules</div>' + group('full') : '') : '<p class="hint">Loading…</p>';
   };

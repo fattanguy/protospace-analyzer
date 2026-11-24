@@ -86,13 +86,15 @@ export function planInterior(U, mods, { LAT, yBase, H, t, tf, opts }) {
   }
   const voidAt = (n, gx, gz, pad) => plan.atria.some(v => v.cut.includes(n) && Math.hypot(gx - v.x, gz - v.z) < v.r + pad * m2g);
   // 2 · lifts: a 2.6 m shaft per module where the most storeys line up
+  //     (the shaft whole inside the walls at the floor — 1.9 m is just over its half-diagonal — and clear of the vault at its head; at
+  //     0.9 m a cell the rooms are too narrow for the 2.2 m all round that was asked before, and no lift fitted anywhere)
   const LIFT = 2.6, taken = [];                                                    // footprints already used: [gx, gz, half x, half z] in grid units
   const free = (gx, gz, hx, hz, pad = 0.6) => taken.every(([x, z, a, c]) => Math.abs(gx - x) > hx + a + pad * m2g || Math.abs(gz - z) > hz + c + pad * m2g);
   if (opts.lifts) for (let i = 0; i < M; i++) {
     let best = null;
     for (const [gx, gz] of cellsOf[i]) {
       if (!free(gx, gz, LIFT / 2 * m2g, LIFT / 2 * m2g, 1.5)) continue;
-      const fits = n => L(gx, levels[n] + H / 2, gz) === i && clear(gx, levels[n] + 0.5, gz, 2.2) && clear(gx, levels[n] + H - 0.6, gz, 2.2) && !voidAt(n, gx, gz, 3) && !voidAt(n + 1, gx, gz, 3);
+      const fits = n => L(gx, levels[n] + H / 2, gz) === i && clear(gx, levels[n] + 0.5, gz, 1.9) && clear(gx, levels[n] + H - 0.6, gz, 1.4) && !voidAt(n, gx, gz, 3) && !voidAt(n + 1, gx, gz, 3);
       const [len, a] = run(fits); if (len < 2) continue;
       const sc = len * 1000 - Math.hypot(gx - cen[i][0], gz - cen[i][1]) * 0.5;
       if (!best || sc > best.sc) best = { sc, i, x: gx, z: gz, a, len };
