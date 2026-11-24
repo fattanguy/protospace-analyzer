@@ -112,7 +112,7 @@ export function planRails(b, fields, { yBase, H, tf, yFold = Infinity, vor = nul
 }
 
 /* A field on a box of the world, sampled every `h` and meshed. fn(x, y, depth) → metres, negative inside. */
-function meshOf(fn, x0, x1, y0, y1, d0, d1, h, smooth = 2) {
+export function meshOf(fn, x0, x1, y0, y1, d0, d1, h, smooth = 2) {
   const NX = Math.ceil((x1 - x0) / h) + 1, NY = Math.ceil((y1 - y0) / h) + 1, NZ = Math.ceil((d1 - d0) / h) + 1, F = new Float32Array(NX * NY * NZ); let o = 0;
   for (let k = 0; k < NZ; k++) for (let j = 0; j < NY; j++) for (let i = 0; i < NX; i++) F[o++] = fn(x0 + i * h, y0 + j * h, d0 + k * h, i, j, k);
   const { pos, index } = netsField(F, NX, NY, NZ); if (!index.length) return null;

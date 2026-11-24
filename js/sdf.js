@@ -118,7 +118,8 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
   /* holeAt(level, gx, gz) → signed distance (metres, negative inside) to the openings cut in that level's plate —
      voids, stairwells, lift shafts. windows = { sill, head } → a ribbon window cut through every near-vertical wall in
      each storey, from `sill` above the floor to `head` below the next one; windows.style 'voronoi' → the shell
-     becomes a web instead: openings the shape of Voronoi cells (cell, jit), ribs of half-width `rib` between them. */
+     becomes a web instead: openings the shape of Voronoi cells (cell, jit), ribs of half-width `rib` between them.
+     windows.keep(gx, y, gz) → true where the shell must stay closed (lattice x and z, height in metres). */
   const FX = (U.nx - 1) * s + 1, FY = (U.ny - 1) * s + 1, FZ = (U.nz - 1) * s + 1, out = new Float32Array(FX * FY * FZ);
   const { nx, ny, f } = U, sxy = nx * ny;
   const ys = new Float32Array(FY); for (let y = 0; y < FY; y++) ys[y] = yOf(U.y0 + y / s);
@@ -138,7 +139,7 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
         if (kind === 'shell') {
           let w = t > 0 ? Math.max(v, -(v + t)) : v;
           if (windows && windows.style === 'voronoi') {                                // a Voronoi web: every cell an opening between ribs, some cells left closed
-            if (w < 0.6 && wy > yBase + 0.3) { voronoi3((U.x0 + xc) * windows.LAT, wy, (U.z0 + zc) * windows.LAT, windows.cell, windows.jit, VO); if (VO.id >= windows.closed) w = Math.max(w, VO.edge - windows.rib); }
+            if (w < 0.6 && wy > yBase + 0.3) { voronoi3((U.x0 + xc) * windows.LAT, wy, (U.z0 + zc) * windows.LAT, windows.cell, windows.jit, VO); if (VO.id >= windows.closed && !(windows.keep && windows.keep(U.x0 + xc, wy, U.z0 + zc))) w = Math.max(w, VO.edge - windows.rib); }
           } else if (inBand && w < 0.6) {                                              // near a wall: is it upright here?
             const cx = Math.min(nx - 2, Math.max(1, Math.round(xc))), cy = Math.min(ny - 2, Math.max(1, Math.round(yc))), cz = Math.min(U.nz - 2, Math.max(1, Math.round(zc))), c = cx + nx * (cy + ny * cz);
             const gx = f[c + 1] - f[c - 1], gy = f[c + nx] - f[c - nx], gz = f[c + sxy] - f[c - sxy];
@@ -152,7 +153,7 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
               const closed = hash3(j, storey, face + 13) < 0.1 * vr;
               const sill = Math.min(H - 1.2, Math.max(0.15, windows.sill + (hash3(j, storey, face + 19) - 0.5) * 1.6 * vr)), head = Math.min(H - sill - 1, Math.max(0.15, windows.head + (hash3(j, storey, face + 29) - 0.5) * 1.6 * vr));
               const winY = Math.max(sill - qy, qy - (H - head)), pier = skip ? -1e9 : ph - Math.abs(qd);
-              if (!closed) w = Math.max(w, -Math.max(winY, pier));                    // a window, except where a pier stands
+              if (!closed && !(windows.keep && windows.keep(U.x0 + xc, wy, U.z0 + zc))) w = Math.max(w, -Math.max(winY, pier));                    // a window, except where a pier stands
             }
           }
           out[o] = w;

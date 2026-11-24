@@ -15,12 +15,13 @@ import { moduleField, unionField, detailField, netsField, plateField, extrudeOut
 import { taubin } from './fuse.js';
 import { planInterior, buildInterior, toPLY, ELEMENTS } from './interior.js';
 import { planRails, buildRails, moveBlocks } from './rails.js';
+import { planRoots, buildRoots } from './roots.js';
 
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, fold: 2, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 3, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, fold: 2, roots: true, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 3, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
@@ -91,8 +92,9 @@ function makeMeshes() {
   B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
   const vor = { style: S.winStyle, cell: S.vor, jit: 0.35 + 0.65 * S.winVar, rib: Math.max(0.38, 0.6 * step), closed: 0.22 };   // the Voronoi web: cell size, how irregular, half a rib, the share of cells left closed
   const rails = folds ? planRails(b, B.fields, { yBase, H: S.H, tf, yFold, vor: S.windows && S.winStyle === 'voronoi' ? vor : null }) : null; B.rails = null;
+  const roots = rails && S.roots ? planRoots(b, U, rails, { k: S.k }) : null;   // js/roots.js: pillars that grow out of the lowest modules as they merge
   const mesh = (kind, mat) => {
-    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar, ...vor } : null });
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar, ...vor, keep: roots ? (gx, wy, gz) => roots.near(b.gridX(gx), wy, -b.gridZ(gz)) : null } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
@@ -134,9 +136,10 @@ function makeMeshes() {
   const fl = B.plan ? plates() : null;
   if (B.plan) B.three.interior.add(buildInterior(B.plan, { LAT: b.LAT, gridX: b.gridX, gridZ: b.gridZ, mats: B.three.PARTS, H: S.H, tf, t }));
   if (rails) { B.rails = buildRails(rails, B.three.PARTS); moveBlocks(B.rails, S.rail / 100); B.three.interior.add(B.rails); }
+  if (roots) B.three.interior.add(buildRoots(roots, B.three.PARTS));
   const cell = Math.pow(b.LAT / s, 3), pl = B.plan;
   B.stats = { tris: [sh, fl].reduce((n, x) => n + (x ? x.m.geometry.index.count / 3 : 0), 0), floorArea: fl ? fl.cells : 0, wallVol: sh ? sh.cells * cell : 0,
-    voids: pl ? pl.atria.reduce((n, v) => n + v.cut.length, 0) : 0, atrium: pl ? pl.atria.some(v => v.main && v.cut.length > 1) : false, stairs: pl ? pl.stairs.length : 0, lifts: pl ? pl.lifts.length : 0, walls: pl ? pl.walls.length : 0, rails: rails ? rails.stats : null };
+    voids: pl ? pl.atria.reduce((n, v) => n + v.cut.length, 0) : 0, atrium: pl ? pl.atria.some(v => v.main && v.cut.length > 1) : false, stairs: pl ? pl.stairs.length : 0, lifts: pl ? pl.lifts.length : 0, walls: pl ? pl.walls.length : 0, rails: rails ? rails.stats : null, roots: roots ? roots.stats : null };
   B.box = new THREE.Box3(); [B.three.building, B.three.interior].forEach(g => g.traverse(o => { if (o.isMesh) B.box.expandByObject(o); }));
   paint(); applyCuts(); applyLook();
 }
@@ -176,7 +179,7 @@ function applyLook() {
   SHELL.opacity = o; SHELL.transparent = o < 0.999; SHELL.depthWrite = o >= 0.999; SHELL.needsUpdate = true;
   /* The vaults of the public floor are the shell of the first level: see-through with it, and then in its own material
      (the ones that slide are red only while the building is drawn solid). */
-  for (const [m, solid] of [[PARTS.vault, BODY], [PARTS.vaultMove, 0xd9685f]]) { m.color.set(o < 0.999 ? BODY : solid); m.opacity = o; m.transparent = o < 0.999; m.depthWrite = o >= 0.999; m.needsUpdate = true; }
+  for (const [m, solid] of [[PARTS.vault, BODY], [PARTS.vaultMove, 0xd9685f], [PARTS.root, BODY]]) { m.color.set(o < 0.999 ? BODY : solid); m.opacity = o; m.transparent = o < 0.999; m.depthWrite = o >= 0.999; m.needsUpdate = true; }
 }
 function applyCuts() {
   const b = B.building; if (!b || !B.three) return;
@@ -200,6 +203,7 @@ const HTML = `
     <h2 class="eyebrow" style="margin-top:16px">The public floor</h2>
     <label class="chk"><input type="checkbox" data-c="rails"> A public floor that folds: the lowest storeys of the ground modules as vaults on rails that slide into each other</label>
     ${slider('fold', 'The part that folds', 2, 4, 1, '', 'How many storeys of the ground modules slide: two keeps the lobbies and the gathering rooms on the ground as double-height halls on rails, and leaves the storeys above them in the building. Four is the whole ground level.')}
+    <label class="chk"><input type="checkbox" data-c="roots"> Roots: as the modules merge, the lowest ones grow thick pillars down to the ground at the four far corners</label>
     ${slider('rail', 'Ground modules · unfolded ↔ folded', 0, 100, 1, '%', 'Unfolded: one vault to a bay, the rooms opening into each other. Folded: the red vaults slide along their rails into the two that stay, nest there, and leave the rest of the deck open. The two that stay carry everything above.')}
     <h2 class="eyebrow" style="margin-top:16px">Merging</h2>
     ${slider('k', 'Merge · every pair', 0, KMAX, 0.25, 'm', 'How far the modules reach for each other: 0 keeps them apart across their 0.9 m seams; a few metres grows a fillet between neighbours until they read as one mass, and their rooms open into each other.')}
@@ -247,7 +251,7 @@ const SQFT = 10.7639, PEOPLE = 350;                                             
 function status(t) { if (R.stats) R.stats.textContent = t; }
 function report() {
   const b = B.building, st = B.stats || {}, nP = neighbours(b.mods, b.cols).length, nO = Object.keys(S.overrides).length;
-  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates${st.rails ? ' above the part that folds' : ''} (${(Math.round(st.floorArea * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(st.floorArea * SQFT / PEOPLE)} sq ft, ${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (st.rails ? ` · the first ${st.rails.storeys} storeys of the ground modules fold (${st.rails.height.toFixed(1)} m): ${st.rails.rooms} vaults on a deck of ${Math.round(st.rails.hall).toLocaleString()} m² (${(Math.round(st.rails.hall * SQFT / 100) * 100).toLocaleString()} sq ft), ${st.rails.sliding} of them sliding into ${st.rails.garages.join(' and ')}; ${S.rail >= 100 ? `folded, ${Math.round(st.rails.open).toLocaleString()} m² (${(Math.round(st.rails.open * SQFT / 100) * 100).toLocaleString()} sq ft) of the deck is open` : S.rail <= 0 ? `unfolded, ${Math.round(st.rails.roomArea).toLocaleString()} m² (${(Math.round(st.rails.roomArea * SQFT / 100) * 100).toLocaleString()} sq ft) of public rooms` : 'on their way'}` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
+  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates${st.rails ? ' above the part that folds' : ''} (${(Math.round(st.floorArea * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(st.floorArea * SQFT / PEOPLE)} sq ft, ${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (st.rails ? ` · the first ${st.rails.storeys} storeys of the ground modules fold (${st.rails.height.toFixed(1)} m): ${st.rails.rooms} vaults on a deck of ${Math.round(st.rails.hall).toLocaleString()} m² (${(Math.round(st.rails.hall * SQFT / 100) * 100).toLocaleString()} sq ft), ${st.rails.sliding} of them sliding into ${st.rails.garages.join(' and ')}; ${S.rail >= 100 ? `folded, ${Math.round(st.rails.open).toLocaleString()} m² (${(Math.round(st.rails.open * SQFT / 100) * 100).toLocaleString()} sq ft) of the deck is open` : S.rail <= 0 ? `unfolded, ${Math.round(st.rails.roomArea).toLocaleString()} m² (${(Math.round(st.rails.roomArea * SQFT / 100) * 100).toLocaleString()} sq ft) of public rooms` : 'on their way'}` : '') + (st.roots ? ` · ${st.roots.count} roots at the far corners, ${st.roots.grounded === st.roots.count ? 'on the ground' : 'still growing down (they reach the ground at a merge of 3 m)'}` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
@@ -258,7 +262,7 @@ function syncControls() {
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
   R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The building as it looks from outside: the merged modules with their walls, opaque.';
   for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors;
-  R.root.querySelector('[data-c=rails]').disabled = !S.floors; R.root.querySelector('[data-s=rail]').disabled = R.root.querySelector('[data-s=fold]').disabled = !S.floors || !S.rails;
+  R.root.querySelector('[data-c=rails]').disabled = !S.floors; R.root.querySelector('[data-c=roots]').disabled = !S.floors || !S.rails; R.root.querySelector('[data-s=rail]').disabled = R.root.querySelector('[data-s=fold]').disabled = !S.floors || !S.rails;
   R.root.querySelector('[data-c=windows]').disabled = S.view === 'interior'; R.root.querySelector('[data-s=winVar]').disabled = S.view === 'interior' || !S.windows;
   R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
   R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = R.root.querySelector('[data-s=tf]').disabled = !hollow() || !S.floors;
@@ -321,7 +325,7 @@ function initThree(canvas) {
   const part = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, clippingPlanes: planes, clipShadows: true, ...extra });
   const PARTS = { stair: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(BODY, { roughness: 0.85 }),
     block: part(0xd9685f, { roughness: 0.8, side: THREE.DoubleSide, shadowSide: THREE.BackSide }),
-    vault: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), vaultMove: part(0xd9685f, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }),   // the vaults that stay · the vaults that slide: applyLook() fades both with the shell
+    vault: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), vaultMove: part(0xd9685f, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), root: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }),   // the vaults that stay · the vaults that slide: applyLook() fades both with the shell
     glass: part(0xa9cfdc, { transparent: true, opacity: 0.28, depthWrite: false, roughness: 0.1, metalness: 0.1, side: THREE.DoubleSide }) };
   const building = new THREE.Group(), interior = new THREE.Group(); scene.add(building, interior);
   B.three = { renderer, scene, camera, controls, building, interior, canvas, planes, SHELL, FLOOR, PARTS, raycaster: new THREE.Raycaster() };
