@@ -10,7 +10,7 @@
    Roots extend with the merge: none at 0, hanging part of the way down at a small merge, on the ground at 3 m, and
    from there on along the ground, further and thicker the more the building merges. The merge also sets how far a
    root flares into the module it grows from (a smooth union with the body, like every other merge on this page).
-   No two of the four are alike: each has its own girth, its own number of branches, its own bow and landing place,
+   No two of the four are alike: each has its own girth, its own number of branches, its own slight lean,
    and runs on along the ground its own way.
 
    Nothing of a root is in the way of the vaults: inside the row it stays above the line the vaults pass under, and
@@ -53,28 +53,28 @@ export function planRoots(b, U, rails, { k, kMax = 20 }) {
     ends.forEach(([c, end], ci) => { for (const side of [-1, 1]) {                    // the street edge, the bay edge
       const dEdge = side < 0 ? row.dW : row.dE, out = side, id = ri * 1000 + ci * 2 + (side > 0 ? 1 : 0), j = n => hash(id, n, 77) - 0.5;
       /* No two alike. thick: the trunk's girth · tips: how many branches it gathers · jy: how far under the line they join ·
-         fx, fo: where it lands, past the end (+) or back along the building (−), and further out · bx, bo: how it bows on the way ·
+         fx, fo: where it lands, a little past the end (+) or back along the building (−), and further out · bx, bo: how little it bows on the way ·
          hx, ho, curl, run: which way it runs on along the ground, how it curls, how far (m) */
-      const K = [{ thick: 1.12, tips: 7, jy: -3.2, fx: 0.8, fo: 0.3, bx: 0.3, bo: 0.5, hx: 0.45, ho: 1, curl: 0.5, run: 12 },      // stout and nearly straight, then straight out
-                 { thick: 0.82, tips: 4, jy: -2.4, fx: 7.5, fo: 1.0, bx: 5.4, bo: 2.2, hx: 1, ho: 0.12, curl: -0.4, run: 17 },     // a long leg thrown past the end, running on away from the building
-                 { thick: 0.98, tips: 6, jy: -4.4, fx: -6.5, fo: 2.6, bx: 2.4, bo: 4.2, hx: -1, ho: 0.3, curl: 0.7, run: 15 },     // bowed out and back along the building, then on along its edge
-                 { thick: 1.34, tips: 5, jy: -3.8, fx: 2.6, fo: 4.4, bx: -1.6, bo: 0.2, hx: 0.25, ho: 1, curl: -0.9, run: 9 }][(id + ri) % 4];   // the heaviest: a knee, a step straight out, a short hooked run   // `out` points away from the row, `end` away from its middle
+      const K = [{ thick: 1.12, tips: 7, jy: -2.4, fx: 0.3, fo: 0.15, bx: 0.1, bo: 0.15, hx: 0.45, ho: 1, curl: 0.5, run: 12 },   // stout and plumb, then straight out
+                 { thick: 0.82, tips: 4, jy: -1.8, fx: 1.6, fo: 0.4, bx: 0.3, bo: 0.3, hx: 1, ho: 0.12, curl: -0.4, run: 17 },     // the slimmest, leaning a little past the end, running on away from the building
+                 { thick: 0.98, tips: 6, jy: -3.0, fx: -1.4, fo: 0.7, bx: 0.2, bo: 0.4, hx: -1, ho: 0.3, curl: 0.7, run: 15 },     // leaning a little back along the building, then on along its edge
+                 { thick: 1.34, tips: 5, jy: -2.6, fx: 0.7, fo: 1.0, bx: -0.2, bo: 0.1, hx: 0.25, ho: 1, curl: -0.9, run: 9 }][(id + ri) % 4];   // the heaviest, stepping a little out, a short hooked run
       // where the branches start: the lowest point of the body over a few spots in from the corner
       const tips = [];
-      for (const [dx, din] of [[1.6, 3.4], [4.2, 2.4], [8.2, 3.0], [12.5, 2.6], [3.4, 8.2], [7.6, 9.6], [12.0, 7.4]]) {
+      for (const [dx, din] of [[1.6, 3.4], [4.2, 2.4], [7.4, 3.0], [2.6, 6.4], [5.6, 7.6], [9.0, 2.6], [8.6, 6.8]]) {   // nearest the corner first
         const x = c.x - end * (dx + 1.6 * j(tips.length + 1)), d = dEdge - out * (din + 1.4 * j(tips.length + 11)); if (x < row.xa + 0.6 || x > row.xb - 0.6) continue;
         for (let y = yFold - 0.2; y < yFold + 16; y += 0.3) if (body(x, y, d) < -0.25) { tips.push([x, Math.max(y + 0.6, yFold + 0.95), d, 0.55, dx]); break; }
       }
       if (tips.length < 2) continue; tips.length = Math.min(tips.length, K.tips);
-      const rJ = Math.min(2.1, Math.max(1.6, 0.72 * Math.sqrt(tips.length))) * K.thick, OUT = 1.5 * rJ + 0.9;   // the trunk carries what its branches bring; its axis stands clear of the row's edge
-      const J = [c.x + end * (0.8 + 0.6 * j(21)), yFold + K.jy + 0.6 * j(22), dEdge + out * OUT], paths = [];   // where the branches join: outside the edge, a little past the end, under the line
+      const rJ = Math.min(2.1, Math.max(1.6, 0.72 * Math.sqrt(tips.length))) * K.thick, OUT = rJ + 0.7, xJ = tips.reduce((a, t) => a + t[0], 0) / tips.length;   // the pillar stands under the middle of its branches, tight against the row's edge   // the trunk carries what its branches bring; its axis stands clear of the row's edge
+      const J = [xJ, yFold + K.jy + 0.4 * j(22), dEdge + out * OUT], paths = [];   // where the branches join: outside the edge, a little past the end, under the line
       for (const T of tips) {
-        const E = [c.x + (T[0] - c.x) * 0.42, yFold + 0.95 + Math.min(1.8, 0.3 * (T[1] - yFold - 0.95)), dEdge + out * EDGE, 0.72], tip = T.slice(0, 4);
+        const E = [xJ + (T[0] - xJ) * 0.5, yFold + 0.95 + Math.min(1.8, 0.3 * (T[1] - yFold - 0.95)), dEdge + out * EDGE, 0.72], tip = T.slice(0, 4);
         paths.push({ pts: soften([tip, [T[0] + (E[0] - T[0]) * 0.45, (T[1] + E[1]) / 2, T[2] + (E[2] - T[2]) * 0.55, 0.64], E, [...J, 0.8]]), from: 'tip' });
       }
       /* one thick piece from the join to the ground — no toes — and then on along the ground as the merge goes on growing */
-      const G = [J[0] + end * K.fx + 0.6 * j(34), 0.5, J[2] + out * K.fo, rJ * 1.3];    // where it lands
-      const M = [(J[0] + G[0]) / 2 + end * K.bx, (J[1] + G[1]) / 2 + 1.2 + 0.8 * j(35), (J[2] + G[2]) / 2 + out * K.bo, rJ * 0.94];
+      const G = [J[0] + end * K.fx + 0.3 * j(34), 0.5, J[2] + out * K.fo, rJ * 1.3];    // where it lands
+      const M = [(J[0] + G[0]) / 2 + end * K.bx, (J[1] + G[1]) / 2 + 0.6 * j(35), (J[2] + G[2]) / 2 + out * K.bo, rJ * 0.97];   // the trunk is a straight pillar, a few hands off plumb
       paths.push({ pts: soften([[...J, rJ], M, [G[0] - end * K.fx * 0.12, 3.4, G[2] - out * K.fo * 0.1, rJ * 1.08], G]), from: 'join' });
       const run = [G]; { let hx = end * K.hx, ho = K.ho; const n = 9, st = K.run / n, turn = K.curl / n;
         for (let i = 1; i <= n; i++) { const c0 = Math.cos(turn * end * out), s0 = Math.sin(turn * end * out), nx = hx * c0 - ho * s0, no = hx * s0 + ho * c0, L = Math.hypot(nx, no) || 1; hx = nx / L; ho = Math.max(0.05, no / L);   // it never turns back in under the building
