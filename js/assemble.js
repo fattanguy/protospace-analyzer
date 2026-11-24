@@ -791,8 +791,11 @@ function planPicture() {                                                        
   g.fillStyle = '#f5f5f5'; g.font = '300 40px Poppins, sans-serif'; g.fillText(`VALVE HQ · ${LAYERS[L].toUpperCase()} · ${SITE.length} × ${SITE.width} M`, pad, c.height - 50);
   return c;
 }
-function save() { try { localStorage.setItem('protospace.assemble', JSON.stringify({ v: 1, layer: A.layer, boards: A.boards.map(b => b.map(t => t ? { id: t.mod.id, rot: t.rot } : null)) })); } catch (e) {} }
-function load() { try { const j = JSON.parse(localStorage.getItem('protospace.assemble') || 'null'); if (!j || j.v !== 1) return false; A.layer = j.layer || 0; j.boards.forEach((b, L) => b.forEach((t, k) => { const m = t && A.modules.find(x => x.id === t.id); A.boards[L][k] = m ? { mod: m, rot: t.rot, uid: ++A.uid } : null; })); return A.boards.some(b => b.some(Boolean)); } catch (e) { return false; } }
+/* The saved board's version. 2 (24 Nov 2026): the stepped building with its folding ground storey is the layout everyone
+   starts from, so a board saved before that is left behind once and the starting point takes its place. */
+const BOARD_V = 2;
+function save() { try { localStorage.setItem('protospace.assemble', JSON.stringify({ v: BOARD_V, layer: A.layer, boards: A.boards.map(b => b.map(t => t ? { id: t.mod.id, rot: t.rot } : null)) })); } catch (e) {} }
+function load() { try { const j = JSON.parse(localStorage.getItem('protospace.assemble') || 'null'); if (!j || j.v !== BOARD_V) return false; A.layer = j.layer || 0; j.boards.forEach((b, L) => b.forEach((t, k) => { const m = t && A.modules.find(x => x.id === t.id); A.boards[L][k] = m ? { mod: m, rot: t.rot, uid: ++A.uid } : null; })); return A.boards.some(b => b.some(Boolean)); } catch (e) { return false; } }
 
 const HTML = `
 <div class="as">
@@ -920,7 +923,7 @@ export function mount(root) {
   R.glb.addEventListener('click', () => new GLTFExporter().parse(A.three.building, out => download(new Blob([out], { type: 'model/gltf-binary' }), 'ProtoSpace-ValveHQ.glb'), err => console.error(err), { binary: true }));
   R.obj.addEventListener('click', () => download(new Blob([new OBJExporter().parse(A.three.building)], { type: 'text/plain' }), 'ProtoSpace-ValveHQ.obj'));
   R.stats.textContent = 'Loading the fifteen modules…';
-  // a first visit (nothing saved) starts from the preset marked `start` in assets/presets.json: The block, nine modules sized for 350 people
+  // a first visit (nothing saved, or a board saved before BOARD_V) starts from the preset marked `start` in assets/presets.json: the stepped building V2
   loadBuiltins().then(() => { A.ready = true; renderPalette(); if (!load()) fetch('assets/presets.json', { cache: 'no-cache' }).then(r => r.json()).then(p => { if (!useBoards((p.find(x => x.start) || p[0]).boards)) autoArrange(7); A.history = []; }).catch(() => autoArrange(7)); else { renderBoard(false); build(); } setTimeout(() => setView('street'), 400); }).catch(err => { R.stats.textContent = 'The modules could not be loaded: ' + (err.message || err); });
   return { show() { window.dispatchEvent(new Event('resize')); }, addModule, placements, useBoards, boardSnapshot };
 }

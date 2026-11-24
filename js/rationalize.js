@@ -20,13 +20,13 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 2, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 3, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
 let R = {};
 
-function load() { try { const j = JSON.parse(localStorage.getItem('protospace.rationalize') || 'null'); if (j && j.rev !== DEF.rev) { delete j.H; j.rev = DEF.rev; }   /* rev 2: the building at 0.9 m a cell, four 4.5 m storeys a level — a storey height kept from before no longer fits */
+function load() { try { const j = JSON.parse(localStorage.getItem('protospace.rationalize') || 'null'); if (j && j.rev !== DEF.rev) return { ...DEF, overrides: {} };   /* rev 3: the folding ground storey and the Voronoi web are how the building is shown; settings kept from before are left behind once (rev 2 was the 0.9 m scale) */
   return { ...DEF, ...(j || {}), overrides: { ...((j && j.overrides) || {}) } }; } catch (e) { return { ...DEF, overrides: {} }; } }
 function save() { try { localStorage.setItem('protospace.rationalize', JSON.stringify(S)); } catch (e) {} }
 
