@@ -99,11 +99,10 @@ export function unionField(fields, pad, kOf) {
 /* The union resampled `s` times finer (trilinear) and turned into the field to contour:
    kind 'shell' → hollow walls of thickness t (or the solid when t ≤ 0); kind 'floors' → plates of thickness tf every
    H metres from yBase (metres), only inside the walls. yOf(gy) → world height of grid y (metres). */
-export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 0, yOf, holeAt = null, windows = null, lift = null }) {
+export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 0, yOf, holeAt = null, windows = null }) {
   /* holeAt(level, gx, gz) → signed distance (metres, negative inside) to the openings cut in that level's plate —
      voids, stairwells, lift shafts. windows = { sill, head } → a ribbon window cut through every near-vertical wall in
-     each storey, from `sill` above the floor to `head` below the next one. lift (m) → the shell starts at that height:
-     everything below it is cut away (the public floor on rails, js/rails.js). */
+     each storey, from `sill` above the floor to `head` below the next one. */
   const FX = (U.nx - 1) * s + 1, FY = (U.ny - 1) * s + 1, FZ = (U.nz - 1) * s + 1, out = new Float32Array(FX * FY * FZ);
   const { nx, ny, f } = U, sxy = nx * ny;
   const ys = new Float32Array(FY); for (let y = 0; y < FY; y++) ys[y] = yOf(U.y0 + y / s);
@@ -138,7 +137,6 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
               if (!closed) w = Math.max(w, -Math.max(winY, pier));                    // a window, except where a pier stands
             }
           }
-          if (lift != null && wy < lift) w = Math.max(w, lift - wy);
           out[o] = w;
         } else {
           let w = Math.max(plate, v);                                               // out to the outer face — the lowest plate is the module's own floor —
