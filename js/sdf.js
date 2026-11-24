@@ -99,10 +99,26 @@ export function unionField(fields, pad, kOf) {
 /* The union resampled `s` times finer (trilinear) and turned into the field to contour:
    kind 'shell' → hollow walls of thickness t (or the solid when t ≤ 0); kind 'floors' → plates of thickness tf every
    H metres from yBase (metres), only inside the walls. yOf(gy) → world height of grid y (metres). */
+/* A Voronoi pattern in space, in metres: seeds jittered on a grid of `cell`. Fills `out` with the distance from the point
+   to the wall between its cell and the next (edge), a number 0…1 of its own for the cell (id) and the cell's seed. */
+const vh = (i, j, k, s) => { let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263) ^ Math.imul(k, 1440662683) ^ Math.imul(s, 1274126177); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+export function voronoi3(x, y, z, cell, jit, out) {
+  const px = x / cell, py = y / cell, pz = z / cell, ix = Math.floor(px), iy = Math.floor(py), iz = Math.floor(pz);
+  let d1 = 1e9, d2 = 1e9, ax = 0, ay = 0, az = 0, bx = 0, by = 0, bz = 0, id = 0;
+  for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const cx = ix + dx, cy = iy + dy, cz = iz + dz, sx = cx + 0.5 + (vh(cx, cy, cz, 1) - 0.5) * jit, sy = cy + 0.5 + (vh(cx, cy, cz, 2) - 0.5) * jit, sz = cz + 0.5 + (vh(cx, cy, cz, 3) - 0.5) * jit;
+    const d = (sx - px) * (sx - px) + (sy - py) * (sy - py) + (sz - pz) * (sz - pz);
+    if (d < d1) { d2 = d1; bx = ax; by = ay; bz = az; d1 = d; ax = sx; ay = sy; az = sz; id = vh(cx, cy, cz, 7); } else if (d < d2) { d2 = d; bx = sx; by = sy; bz = sz; }
+  }
+  out.edge = (d2 - d1) / (2 * (Math.hypot(ax - bx, ay - by, az - bz) || 1e-6)) * cell; out.id = id; out.sx = ax * cell; out.sy = ay * cell; out.sz = az * cell; return out;
+}
+const VO = { edge: 0, id: 0, sx: 0, sy: 0, sz: 0 };
+
 export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 0, yOf, holeAt = null, windows = null }) {
   /* holeAt(level, gx, gz) → signed distance (metres, negative inside) to the openings cut in that level's plate —
      voids, stairwells, lift shafts. windows = { sill, head } → a ribbon window cut through every near-vertical wall in
-     each storey, from `sill` above the floor to `head` below the next one. */
+     each storey, from `sill` above the floor to `head` below the next one; windows.style 'voronoi' → the shell
+     becomes a web instead: openings the shape of Voronoi cells (cell, jit), ribs of half-width `rib` between them. */
   const FX = (U.nx - 1) * s + 1, FY = (U.ny - 1) * s + 1, FZ = (U.nz - 1) * s + 1, out = new Float32Array(FX * FY * FZ);
   const { nx, ny, f } = U, sxy = nx * ny;
   const ys = new Float32Array(FY); for (let y = 0; y < FY; y++) ys[y] = yOf(U.y0 + y / s);
@@ -121,7 +137,9 @@ export function detailField(U, s, kind, { t = 0.6, tf = 0.35, H = 4.13, yBase = 
         const c0 = c00 + (c10 - c00) * ty, c1 = c01 + (c11 - c01) * ty, v = c0 + (c1 - c0) * tz;
         if (kind === 'shell') {
           let w = t > 0 ? Math.max(v, -(v + t)) : v;
-          if (inBand && w < 0.6) {                                                     // near a wall: is it upright here?
+          if (windows && windows.style === 'voronoi') {                                // a Voronoi web: every cell an opening between ribs, some cells left closed
+            if (w < 0.6 && wy > yBase + 0.3) { voronoi3((U.x0 + xc) * windows.LAT, wy, (U.z0 + zc) * windows.LAT, windows.cell, windows.jit, VO); if (VO.id >= windows.closed) w = Math.max(w, VO.edge - windows.rib); }
+          } else if (inBand && w < 0.6) {                                              // near a wall: is it upright here?
             const cx = Math.min(nx - 2, Math.max(1, Math.round(xc))), cy = Math.min(ny - 2, Math.max(1, Math.round(yc))), cz = Math.min(U.nz - 2, Math.max(1, Math.round(zc))), c = cx + nx * (cy + ny * cz);
             const gx = f[c + 1] - f[c - 1], gy = f[c + nx] - f[c - nx], gz = f[c + sxy] - f[c - sxy];
             if (gy * gy < 0.2 * (gx * gx + gy * gy + gz * gz)) {

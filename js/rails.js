@@ -24,7 +24,7 @@
    buildRails(plan, mats)                 → a THREE.Group: the deck, the rails, the vaults, the garage walls
    moveBlocks(group, s)                   → the vaults at s = 0 (unfolded) … 1 (folded) */
 import * as THREE from 'three';
-import { netsField } from './sdf.js';
+import { netsField, voronoi3 } from './sdf.js';
 import { taubin } from './fuse.js';
 
 const WALL = 0.5, GAP = 0.3, STEP = 0.3, NEAR = 1.6, SILL = 0.9, RING = 1.2;                                             // a vault's wall · the play between two nested vaults · the sampling step · how far from its module's mass a vault keeps its skin · the sill along the rails · the frame at each end (m)
@@ -51,7 +51,7 @@ function blur2(a, W, H, passes) {
   return s;
 }
 
-export function planRails(b, fields, { yBase, H, tf }) {
+export function planRails(b, fields, { yBase, H, tf, vor = null }) {
   const site = b.site, ground = b.mods.map((m, i) => ({ m, i })).filter(q => q.m.L === 0); if (!ground.length || !site || !fields) return null;
   const yDeck = yBase + tf, yTop = (b.PODIUM_V + b.PITCH_V) * b.LAT, LAT = b.LAT;      // the deck's top · the underside of the level above
   const z0w = -b.gridZ(0), dzw = -(b.gridZ(1) - b.gridZ(0)), y0w = b.gridY(0), dyw = b.gridY(1) - b.gridY(0);   // lattice → depth from the street edge, height
@@ -104,7 +104,7 @@ export function planRails(b, fields, { yBase, H, tf }) {
     decks.push({ x0: row.xa, x1: row.xb, d0: dW, d1: dE }); rows.push(row);
   }
   const hall = rows.reduce((a, q) => a + (q.xb - q.xa) * (q.dE - q.dW), 0), gar = vaults.filter(v => v.garage), room = v => v.L * Math.max(0, v.d1 - v.d0 - 2 * WALL);
-  return { yBase, yDeck, yTop, tf, h, rows, decks, rails, vaults, ribs, map: { x0w: b.gridX(0), dxw: b.gridX(1) - b.gridX(0), y0w, dyw, z0w, dzw },
+  return { yBase, yDeck, yTop, tf, h, vor, rows, decks, rails, vaults, ribs, map: { x0w: b.gridX(0), dxw: b.gridX(1) - b.gridX(0), y0w, dyw, z0w, dzw },
     stats: { hall, open: hall - gar.reduce((a, v) => a + v.L * (v.d1 - v.d0), 0), rooms: vaults.length, roomArea: vaults.reduce((a, v) => a + room(v), 0), garages: gar.map(v => v.id), sliding: vaults.length - gar.length, length: Math.max(...rows.map(q => q.xb - q.xa)), depth: rows[0].dE - rows[0].dW } };
 }
 
@@ -138,14 +138,21 @@ export function buildRails(plan, mats) {
   const at = (v, y, d) => { const k = Math.min(v.W - 1, Math.max(0, Math.round((d - v.dA) / h))), j = Math.min(v.H - 1, Math.max(0, Math.round((y - v.yA) / h))); return v.sd[k + v.W * j]; };
   const add = (g, v, el, mat, name) => { if (!g) return null; const m = new THREE.Mesh(g, mat); m.castShadow = m.receiveShadow = true; m.name = name; m.userData = { element: el, mods: new Int16Array(g.getAttribute('position').count).fill(v.i) }; group.add(m); return m; };
   for (const v of plan.vaults) {
-    const mass = massOf(v.F), near = NEAR + v.order * (WALL + GAP);              // a trimmed vault stands further in from its module's surface
+    const mass = massOf(v.F), near = NEAR + v.order * (WALL + GAP), VO = {}, web = plan.vor;   // a trimmed vault stands further in from its module's surface
+    /* With the Voronoi web the skin is a net of ribs: a cell is closed where its seed lies in or near the module's mass and
+       open elsewhere. Without it, the skin simply stops where the module's mass is far. */
+    const skin = web ? (x, y, d) => { voronoi3(x, y, d, web.cell, web.jit, VO); return mass(VO.sx, VO.sy, VO.sz) < near ? -1 : VO.edge - Math.max(web.rib, 1.1 * STEP); } : (x, y, d) => mass(x, y, d) - near;
     const g = meshOf((x, y, d) => { const s = at(v, y, d), sh = Math.max(s, -(s + WALL)), ax = Math.abs(x - v.xc); if (sh > 0.6) return sh;
-      return Math.max(sh, ax - (v.L / 2 - 0.15), yDeck - y, Math.min(mass(x, y, d) - near, y - (yDeck + SILL), (v.L / 2 - RING) - ax)); }, v.xc - v.L / 2 - h, v.xc + v.L / 2 + h, yDeck - h, v.top + 2 * h, v.d0 - 2 * h, v.d1 + 2 * h, h);
+      return Math.max(sh, ax - (v.L / 2 - 0.15), yDeck - y, Math.min(skin(x, y, d), y - (yDeck + SILL), (v.L / 2 - RING) - ax)); }, v.xc - v.L / 2 - h, v.xc + v.L / 2 + h, yDeck - h, v.top + 2 * h, v.d0 - 2 * h, v.d1 + 2 * h, h);
     const m = add(g, v, v.garage ? 0 : 8, v.garage ? mats.solid : mats.block, `${v.id} · ${v.garage ? 'garage vault' : 'sliding vault'}`);
     if (m && !v.garage) moving.push({ m, dx: v.xg - v.xc });
   }
   for (const q of plan.ribs) {                                                       // across each end of a garage: from its vault up to the level above, open where the vaults pass
-    const v = q.v, g = meshOf((x, y, d) => Math.max(Math.abs(x - q.x) - RIB / 2, -(at(v, y, d) + WALL - 0.05), v.d0 - d, d - v.d1, yDeck - y, y - yTop), q.x - RIB / 2 - 2 * h, q.x + RIB / 2 + 2 * h, yDeck - h, yTop + h, v.d0 - 2 * h, v.d1 + 2 * h, h, 0);
+    const v = q.v, VO = {}, web = plan.vor, rb = web ? Math.max(web.rib, 1.1 * STEP) : 0;
+    const g = meshOf((x, y, d) => {
+      const w = Math.max(Math.abs(x - q.x) - RIB / 2, -(at(v, y, d) + WALL - 0.05), v.d0 - d, d - v.d1, yDeck - y, y - yTop); if (!web || w > 0.6) return w;
+      if (at(v, y, d) < 0.5 || y > yTop - 0.7 || d < v.d0 + 0.6 || d > v.d1 - 0.6) return w;   // a frame round the opening, under the level above and down both sides
+      voronoi3(q.x, y, d, web.cell, web.jit, VO); return Math.max(w, VO.edge - rb); }, q.x - RIB / 2 - 2 * h, q.x + RIB / 2 + 2 * h, yDeck - h, yTop + h, v.d0 - 2 * h, v.d1 + 2 * h, h, 0);
     add(g, v, 0, mats.solid, `${v.id} · garage wall`);
   }
   group.userData = { moving };

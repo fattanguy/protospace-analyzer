@@ -20,7 +20,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, H: 4.5, rev: 2, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 2, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
@@ -85,9 +85,10 @@ function makeMeshes() {
   const labelsOf = (pos, fine) => { const L = new Int16Array(pos.length / 3); for (let v = 0; v < L.length; v++) { const x = Math.round(pos[v * 3] / fine), y = Math.round(pos[v * 3 + 1] / fine), z = Math.round(pos[v * 3 + 2] / fine); L[v] = U.lab[Math.min(U.nx - 1, x) + U.nx * (Math.min(U.ny - 1, y) + U.ny * Math.min(U.nz - 1, z))] - 1; } return L; };
   const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = S.tf, yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
   B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
-  const rails = folds ? planRails(b, B.fields, { yBase, H: S.H, tf }) : null; B.rails = null;
+  const vor = { style: S.winStyle, cell: S.vor, jit: 0.35 + 0.65 * S.winVar, rib: Math.max(0.38, 0.6 * step), closed: 0.22 };   // the Voronoi web: cell size, how irregular, half a rib, the share of cells left closed
+  const rails = folds ? planRails(b, B.fields, { yBase, H: S.H, tf, vor: S.windows && S.winStyle === 'voronoi' ? vor : null }) : null; B.rails = null;
   const mesh = (kind, mat) => {
-    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar } : null });
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar, ...vor } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
@@ -210,7 +211,9 @@ const HTML = `
     <label class="chk"><input type="checkbox" data-c="stairs"> Stairs between every pair of floors</label>
     <label class="chk"><input type="checkbox" data-c="lifts"> Lift shafts</label>
     <label class="chk"><input type="checkbox" data-c="windows"> Openings in the outer walls</label>
-    ${slider('winVar', 'Openings · variety', 0, 1, 0.05, '', 'At 0 every opening is the same, between 1.5 m piers every 6 m. Higher, the piers vary in width and some are left out — two or three bays open up as one — and every opening gets its own sill and head; now and then a bay stays closed.')}
+    <div class="xp-row rz-win"><span class="hint">Style</span><button type="button" class="btn quiet" data-win="voronoi">Voronoi web</button><button type="button" class="btn quiet" data-win="ribbon">Ribbons</button></div>
+    ${slider('vor', 'Voronoi · cell size', 3, 9, 0.3, 'm', 'The pattern that made the voxel cloud, drawn on the walls: every cell is an opening, the ribs between the cells are the structure, and about one cell in five stays closed. The vaults of the ground storey and the levels above share one web.')}
+    ${slider('winVar', 'Openings · variety', 0, 1, 0.05, '', 'Voronoi web: how far the cells stray from a regular grid. Ribbons: at 0 every opening is the same, between 1.5 m piers every 6 m; higher, the piers vary in width and some are left out, and every opening gets its own sill and head.')}
     <label class="chk"><input type="checkbox" data-c="partitions"> Rooms and doors — in workspaces and hybrids</label>
     <div class="xp-row rz-res"><span class="hint">Detail</span><button type="button" class="btn quiet" data-res="1">1 m</button><button type="button" class="btn quiet" data-res="2">0.5 m</button></div>
     <h2 class="eyebrow" style="margin-top:16px">Seeing inside</h2>
@@ -243,6 +246,7 @@ function syncControls() {
   $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'rail' ? (v <= 0 ? 'unfolded' : v >= 100 ? 'folded' : `${v} %`) : k === 'winVar' ? (v <= 0 ? 'none' : `${Math.round(v * 100)} %`) : k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
   $$('[data-c]', R.root).forEach(x => { x.checked = !!S[x.dataset.c]; });
   $$('[data-res]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.res === S.res));
+  $$('[data-win]', R.root).forEach(x => { x.classList.toggle('on', x.dataset.win === S.winStyle); x.disabled = S.view === 'interior' || !S.windows; }); R.root.querySelector('[data-s=vor]').disabled = S.view === 'interior' || !S.windows || S.winStyle !== 'voronoi';
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
   R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The building as it looks from outside: the merged modules with their walls, opaque.';
   for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors;
@@ -345,13 +349,14 @@ export function mount(root, { getBuilding, useBoards = null, boardSnapshot = nul
   root.innerHTML = HTML; R = { root }; $$('[data-v]', root).forEach(el => { R[el.dataset.v] = el; });
   initThree(R.canvas); syncControls();
   // sliders and switches: each one re-runs only the stage it changes
-  const STAGE = { k: 1, t: 2, H: 2, tf: 2, winVar: 2, soft: 0 };
+  const STAGE = { k: 1, t: 2, H: 2, tf: 2, winVar: 2, vor: 2, soft: 0 };
   $$('[data-s]', root).forEach(x => x.addEventListener('input', () => {
     const k = x.dataset.s; S[k] = +x.value; syncControls(); save();
     if (k === 'opacity') applyLook(); else if (/^cut/.test(k)) applyCuts(); else if (k === 'rail') { if (B.rails) moveBlocks(B.rails, S.rail / 100); report(); } else { if (k === 'k') renderPairs(); schedule(STAGE[k], 220); }
   }));
   $$('[data-c]', root).forEach(x => x.addEventListener('change', () => { S[x.dataset.c] = x.checked; syncControls(); save(); schedule(2, 0); }));
   $$('[data-res]', root).forEach(x => x.addEventListener('click', () => { S.res = +x.dataset.res; syncControls(); save(); schedule(2, 0); }));
+  $$('[data-win]', root).forEach(x => x.addEventListener('click', () => { if (S.winStyle === x.dataset.win) return; S.winStyle = x.dataset.win; syncControls(); save(); schedule(2, 0); }));
   $$('[data-mode]', root).forEach(x => x.addEventListener('click', () => { if (S.view === x.dataset.mode) return; S.view = x.dataset.mode; syncControls(); save(); applyLook(); schedule(2, 0); }));
   $$('[data-view]', root).forEach(x => x.addEventListener('click', () => setView(x.dataset.view)));
   R.reset.addEventListener('click', () => { Object.assign(S, { ...DEF, overrides: {} }); B.sel = []; syncControls(); save(); renderPairs(); schedule(0, 0); });
