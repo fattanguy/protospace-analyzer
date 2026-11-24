@@ -14,12 +14,13 @@ import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { moduleField, unionField, detailField, netsField, plateField, extrudeOutline } from './sdf.js';
 import { taubin } from './fuse.js';
 import { planInterior, buildInterior, toPLY, ELEMENTS } from './interior.js';
+import { planRails, buildRails, moveBlocks } from './rails.js';
 
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, H: 4.5, rev: 2, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, H: 4.5, rev: 2, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
@@ -78,8 +79,12 @@ function makeMeshes() {
   const labelsOf = (pos, fine) => { const L = new Int16Array(pos.length / 3); for (let v = 0; v < L.length; v++) { const x = Math.round(pos[v * 3] / fine), y = Math.round(pos[v * 3 + 1] / fine), z = Math.round(pos[v * 3 + 2] / fine); L[v] = U.lab[Math.min(U.nx - 1, x) + U.nx * (Math.min(U.ny - 1, y) + U.ny * Math.min(U.nz - 1, z))] - 1; } return L; };
   const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = S.tf, yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
   B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
+  /* The public floor on rails: the shells start one storey up, the deck is one open floor, and what was planned inside
+     the ground storey (its plates, partitions and parapets) gives way to the blocks on their tracks. */
+  const rails = S.rails && hollow() && S.floors ? planRails(U, b, { yBase, H: S.H, t, tf }) : null; B.rails = null;
+  if (rails && B.plan) { B.plan.walls = B.plan.walls.filter(w => w.n > 0); for (const v of B.plan.atria) v.cut = v.cut.filter(n => n > 0); }
   const mesh = (kind, mat) => {
-    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar } : null });
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar } : null, lift: kind === 'shell' && rails ? rails.yCut : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
@@ -95,6 +100,7 @@ function makeMeshes() {
   const plates = () => {
     const P = [], I = [], Lb = []; let cells = 0;
     B.plan.levels.forEach((y, n) => {
+      if (rails && n === 0) return;                                                    // the deck takes the place of the lowest plates
       const O = plateField(U, s, { yMid: (y + tf / 2) / b.LAT - 0.5, yAbove: (y + tf + 1.5) / b.LAT - 0.5, t, holeAt: (gx, gz) => B.plan.holeAt(n, gx, gz) });
       for (let i = 0; i < O.F.length; i++) if (O.F[i] < 0) cells++;
       let { pos, index } = extrudeOutline(O); if (!index.length) return;
@@ -120,9 +126,10 @@ function makeMeshes() {
   const sh = S.view !== 'interior' ? mesh('shell', B.three.SHELL) : null;            // "Interior only" draws no shell at all
   const fl = B.plan ? plates() : null;
   if (B.plan) B.three.interior.add(buildInterior(B.plan, { LAT: b.LAT, gridX: b.gridX, gridZ: b.gridZ, mats: B.three.PARTS, H: S.H, tf, t }));
+  if (rails) { B.rails = buildRails(rails, B.three.PARTS); moveBlocks(B.rails, S.rail / 100); B.three.interior.add(B.rails); }
   const cell = Math.pow(b.LAT / s, 3), pl = B.plan;
   B.stats = { tris: [sh, fl].reduce((n, x) => n + (x ? x.m.geometry.index.count / 3 : 0), 0), floorArea: fl ? fl.cells : 0, wallVol: sh ? sh.cells * cell : 0,
-    voids: pl ? pl.atria.reduce((n, v) => n + v.cut.length, 0) : 0, atrium: pl ? pl.atria.some(v => v.main && v.cut.length > 1) : false, stairs: pl ? pl.stairs.length : 0, lifts: pl ? pl.lifts.length : 0, walls: pl ? pl.walls.length : 0 };
+    voids: pl ? pl.atria.reduce((n, v) => n + v.cut.length, 0) : 0, atrium: pl ? pl.atria.some(v => v.main && v.cut.length > 1) : false, stairs: pl ? pl.stairs.length : 0, lifts: pl ? pl.lifts.length : 0, walls: pl ? pl.walls.length : 0, rails: rails ? rails.stats : null };
   B.box = new THREE.Box3(); [B.three.building, B.three.interior].forEach(g => g.traverse(o => { if (o.isMesh) B.box.expandByObject(o); }));
   paint(); applyCuts(); applyLook();
 }
@@ -180,6 +187,9 @@ const HTML = `
     <h2 class="eyebrow" style="margin-top:16px">Show the modules</h2>
     <div class="xp-row rz-mode" role="group" aria-label="Show the modules"><button type="button" class="btn quiet" data-mode="solid">As they look</button><button type="button" class="btn quiet" data-mode="hollow">Hollow · see-through</button><button type="button" class="btn quiet" data-mode="interior">Interior only</button></div>
     <p class="hint" data-v="modeNote"></p>
+    <h2 class="eyebrow" style="margin-top:16px">The public floor</h2>
+    <label class="chk"><input type="checkbox" data-c="rails"> Ground storey on rails: the shells lifted one storey onto posts, blocks on tracks for walls</label>
+    ${slider('rail', 'Walls · in ↔ out', 0, 100, 1, '%', 'In: the blocks stand on the seams between the bays, one room to a bay. Out: they roll along their tracks onto the deck beyond both ends of the building, and the rooms merge into one hall.')}
     <h2 class="eyebrow" style="margin-top:16px">Merging</h2>
     ${slider('k', 'Merge · every pair', 0, KMAX, 0.25, 'm', 'How far the modules reach for each other: 0 keeps them apart across their 0.9 m seams; a few metres grows a fillet between neighbours until they read as one mass, and their rooms open into each other.')}
     <div class="rz-pair" data-v="pair"></div>
@@ -224,16 +234,17 @@ const SQFT = 10.7639, PEOPLE = 350;                                             
 function status(t) { if (R.stats) R.stats.textContent = t; }
 function report() {
   const b = B.building, st = B.stats || {}, nP = neighbours(b.mods, b.cols).length, nO = Object.keys(S.overrides).length;
-  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates (${(Math.round(st.floorArea * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(st.floorArea * SQFT / PEOPLE)} sq ft, ${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
+  status(`${b.mods.length} modules · ${nP} neighbouring pairs${nO ? ` · ${nO} set by hand` : ''} · ${Math.round(st.tris || 0).toLocaleString()} triangles` + (hollow() && S.floors ? ` · ≈ ${Math.round(st.floorArea).toLocaleString()} m² of floor plates${st.rails ? ' above the public floor' : ''} (${(Math.round(st.floorArea * SQFT / 100) * 100).toLocaleString()} sq ft · ${Math.round(st.floorArea * SQFT / PEOPLE)} sq ft, ${Math.round(st.floorArea / PEOPLE)} m² per person at ${PEOPLE})` : '') + (st.rails ? ` · public floor on rails: ${Math.round(st.rails.hall).toLocaleString()} m² (${(Math.round(st.rails.hall * SQFT / 100) * 100).toLocaleString()} sq ft) under the lifted shells, ${S.rail >= 100 ? 'one hall with the walls out' : S.rail <= 0 ? `${st.rails.rooms} rooms of about ${Math.round(st.rails.room).toLocaleString()} m² with the walls in` : 'the walls on their way'} · ${st.rails.blocks} blocks on ${st.rails.tracks} tracks · ${st.rails.posts} posts` : '') + (B.plan ? ` · ${st.voids} double-height void${st.voids === 1 ? '' : 's'}${st.atrium ? ' (one atrium through the full height)' : ''} · ${st.stairs} stair${st.stairs === 1 ? '' : 's'} · ${st.lifts} lift${st.lifts === 1 ? '' : 's'} · ${st.walls} partitions` : '') + ` · ${Math.round((B.ms.union || 0) + (B.ms.mesh || 0))} ms`);
 }
 function syncControls() {
   $$('[data-s]', R.root).forEach(x => { x.value = S[x.dataset.s]; });
-  $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'winVar' ? (v <= 0 ? 'none' : `${Math.round(v * 100)} %`) : k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
+  $$('[data-out]', R.root).forEach(o => { const k = o.dataset.out, v = S[k]; o.textContent = k === 'rail' ? (v <= 0 ? 'in' : v >= 100 ? 'out' : `${v} % out`) : k === 'winVar' ? (v <= 0 ? 'none' : `${Math.round(v * 100)} %`) : k === 'opacity' ? `${Math.round(v * 100)} %` : k === 'soft' ? ['off', 'a little', 'more', 'most'][v] : /^cut/.test(k) ? (k === 'cutY' ? (v >= 70 ? 'off' : `${(+v).toFixed(1)} m`) : (v <= 0 ? 'off' : `${v} %`)) : `${(+v).toFixed(2).replace(/\.?0+$/, '')} m`; });
   $$('[data-c]', R.root).forEach(x => { x.checked = !!S[x.dataset.c]; });
   $$('[data-res]', R.root).forEach(x => x.classList.toggle('on', +x.dataset.res === S.res));
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
   R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The building as it looks from outside: the merged modules with their walls, opaque.';
   for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors;
+  R.root.querySelector('[data-c=rails]').disabled = !S.floors; R.root.querySelector('[data-s=rail]').disabled = !S.floors || !S.rails;
   R.root.querySelector('[data-c=windows]').disabled = S.view === 'interior'; R.root.querySelector('[data-s=winVar]').disabled = S.view === 'interior' || !S.windows;
   R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
   R.root.querySelector('[data-s=t]').disabled = !hollow(); R.root.querySelector('[data-c=floors]').disabled = !hollow(); R.root.querySelector('[data-s=opacity]').disabled = S.view !== 'hollow'; R.root.querySelector('[data-s=H]').disabled = R.root.querySelector('[data-s=tf]').disabled = !hollow() || !S.floors;
@@ -295,6 +306,7 @@ function initThree(canvas) {
   const FLOOR = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0, side: THREE.DoubleSide, shadowSide: THREE.BackSide, clippingPlanes: planes, clipShadows: true });
   const part = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, clippingPlanes: planes, clipShadows: true, ...extra });
   const PARTS = { stair: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(BODY, { roughness: 0.85 }),
+    block: part(0xe4312b, { roughness: 0.7 }),
     glass: part(0xa9cfdc, { transparent: true, opacity: 0.28, depthWrite: false, roughness: 0.1, metalness: 0.1, side: THREE.DoubleSide }) };
   const building = new THREE.Group(), interior = new THREE.Group(); scene.add(building, interior);
   B.three = { renderer, scene, camera, controls, building, interior, canvas, planes, SHELL, FLOOR, PARTS, raycaster: new THREE.Raycaster() };
@@ -334,7 +346,7 @@ export function mount(root, { getBuilding, useBoards = null, boardSnapshot = nul
   const STAGE = { k: 1, t: 2, H: 2, tf: 2, winVar: 2, soft: 0 };
   $$('[data-s]', root).forEach(x => x.addEventListener('input', () => {
     const k = x.dataset.s; S[k] = +x.value; syncControls(); save();
-    if (k === 'opacity') applyLook(); else if (/^cut/.test(k)) applyCuts(); else { if (k === 'k') renderPairs(); schedule(STAGE[k], 220); }
+    if (k === 'opacity') applyLook(); else if (/^cut/.test(k)) applyCuts(); else if (k === 'rail') { if (B.rails) moveBlocks(B.rails, S.rail / 100); report(); } else { if (k === 'k') renderPairs(); schedule(STAGE[k], 220); }
   }));
   $$('[data-c]', root).forEach(x => x.addEventListener('change', () => { S[x.dataset.c] = x.checked; syncControls(); save(); schedule(2, 0); }));
   $$('[data-res]', root).forEach(x => x.addEventListener('click', () => { S.res = +x.dataset.res; syncControls(); save(); schedule(2, 0); }));

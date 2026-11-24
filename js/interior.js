@@ -19,8 +19,8 @@ import * as THREE from 'three';
 import { netsField } from './sdf.js';
 import { taubin } from './fuse.js';
 
-export const ELEMENTS = ['wall', 'floor', 'stair', 'lift', 'glass partition', 'solid partition', 'balustrade', 'metal'];
-export const ELEMENT_COLOR = ['#e9e5de', '#a79f93', '#c62828', '#3a3a3a', '#9fc3d1', '#d8d2c8', '#b9d3dc', '#6e6e6e'];
+export const ELEMENTS = ['wall', 'floor', 'stair', 'lift', 'glass partition', 'solid partition', 'balustrade', 'metal', 'block on rails'];
+export const ELEMENT_COLOR = ['#e9e5de', '#a79f93', '#c62828', '#3a3a3a', '#9fc3d1', '#d8d2c8', '#b9d3dc', '#6e6e6e', '#e4312b'];
 const USES = ['lobby', 'office', 'social', 'hybrid'];
 
 // ------------------------------------------------------------------ planning
