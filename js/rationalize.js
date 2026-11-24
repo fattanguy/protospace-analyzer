@@ -172,8 +172,11 @@ function paint() {
   }
 }
 function applyLook() {
-  const { SHELL } = B.three, o = S.view === 'hollow' ? S.opacity : 1;
+  const { SHELL, PARTS } = B.three, o = S.view === 'hollow' ? S.opacity : 1;
   SHELL.opacity = o; SHELL.transparent = o < 0.999; SHELL.depthWrite = o >= 0.999; SHELL.needsUpdate = true;
+  /* The vaults of the public floor are the shell of the first level: see-through with it, and then in its own material
+     (the ones that slide are red only while the building is drawn solid). */
+  for (const [m, solid] of [[PARTS.vault, BODY], [PARTS.vaultMove, 0xd9685f]]) { m.color.set(o < 0.999 ? BODY : solid); m.opacity = o; m.transparent = o < 0.999; m.depthWrite = o >= 0.999; m.needsUpdate = true; }
 }
 function applyCuts() {
   const b = B.building; if (!b || !B.three) return;
@@ -318,6 +321,7 @@ function initThree(canvas) {
   const part = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0, clippingPlanes: planes, clipShadows: true, ...extra });
   const PARTS = { stair: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), dark: part(0x2e2e2e, { roughness: 0.5, metalness: 0.3 }), metal: part(0x8c8c8c, { roughness: 0.35, metalness: 0.6 }), cab: part(0x4a4a4a, { roughness: 0.5 }), solid: part(BODY, { roughness: 0.85 }),
     block: part(0xd9685f, { roughness: 0.8, side: THREE.DoubleSide, shadowSide: THREE.BackSide }),
+    vault: part(BODY, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }), vaultMove: part(0xd9685f, { roughness: 0.85, side: THREE.DoubleSide, shadowSide: THREE.BackSide }),   // the vaults that stay · the vaults that slide: applyLook() fades both with the shell
     glass: part(0xa9cfdc, { transparent: true, opacity: 0.28, depthWrite: false, roughness: 0.1, metalness: 0.1, side: THREE.DoubleSide }) };
   const building = new THREE.Group(), interior = new THREE.Group(); scene.add(building, interior);
   B.three = { renderer, scene, camera, controls, building, interior, canvas, planes, SHELL, FLOOR, PARTS, raycaster: new THREE.Raycaster() };

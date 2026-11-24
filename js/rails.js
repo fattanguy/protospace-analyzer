@@ -147,7 +147,7 @@ export function buildRails(plan, mats) {
     const skin = web ? (x, y, d) => { voronoi3(x, y, d, web.cell, web.jit, VO); return mass(VO.sx, VO.sy, VO.sz) < near ? -1 : VO.edge - Math.max(web.rib, 1.1 * STEP); } : (x, y, d) => mass(x, y, d) - near;
     const g = meshOf((x, y, d) => { const s = at(v, y, d), sh = Math.max(s, -(s + WALL)), ax = Math.abs(x - v.xc); if (sh > 0.6) return sh;
       return Math.max(sh, ax - (v.L / 2 - 0.15), yDeck - y, Math.min(skin(x, y, d), y - (yDeck + SILL), (v.L / 2 - RING) - ax)); }, v.xc - v.L / 2 - h, v.xc + v.L / 2 + h, yDeck - h, v.top + 2 * h, v.d0 - 2 * h, v.d1 + 2 * h, h);
-    const m = add(g, v, v.garage ? 0 : 8, v.garage ? mats.solid : mats.block, `${v.id} · ${v.garage ? 'garage vault' : 'sliding vault'}`);
+    const m = add(g, v, v.garage ? 0 : 8, v.garage ? mats.vault || mats.solid : mats.vaultMove || mats.block, `${v.id} · ${v.garage ? 'garage vault' : 'sliding vault'}`);
     if (m && !v.garage) moving.push({ m, dx: v.xg - v.xc });
   }
   for (const q of plan.ribs) {                                                       // across each end of a garage: from its vault up to the level above, open where the vaults pass
@@ -156,7 +156,7 @@ export function buildRails(plan, mats) {
       const w = Math.max(Math.abs(x - q.x) - RIB / 2, -(at(v, y, d) + WALL - 0.05), v.d0 - d, d - v.d1, yDeck - y, y - yTop); if (!web || w > 0.6) return w;
       if (at(v, y, d) < 0.5 || y > yTop - 0.7 || d < v.d0 + 0.6 || d > v.d1 - 0.6) return w;   // a frame round the opening, under the level above and down both sides
       voronoi3(q.x, y, d, web.cell, web.jit, VO); return Math.max(w, VO.edge - rb); }, q.x - RIB / 2 - 2 * h, q.x + RIB / 2 + 2 * h, yDeck - h, yTop + h, v.d0 - 2 * h, v.d1 + 2 * h, h, 0);
-    add(g, v, 0, mats.solid, `${v.id} · garage wall`);
+    add(g, v, 0, mats.vault || mats.solid, `${v.id} · garage wall`);
   }
   group.userData = { moving };
   return group;
