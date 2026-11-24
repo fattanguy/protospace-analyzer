@@ -4,12 +4,14 @@
    the modules merge, the lowest parts of the building grow roots: at the four far corners of a row of ground bays —
    its two ends, on both long edges — branches leave the underside of the modules beside the corner, run to the
    edge, join into one thick trunk outside the path of the sliding vaults, and come down past the deck to the ground
-   in one piece, a little wider at the foot. They are pillars, drawn as a tree's roots. (The middle of the row stands on the
+   in one piece — no toes. They are pillars, drawn as a tree's roots. (The middle of the row stands on the
    two vaults that stay.)
 
-   Roots come with the merge: none at 0, hanging part of the way down at a small merge, on the ground from 3 m. The
-   merge also sets how far a root flares into the module it grows from (a smooth union with the body, like every
-   other merge on this page).
+   Roots extend with the merge: none at 0, hanging part of the way down at a small merge, on the ground at 3 m, and
+   from there on along the ground, further and thicker the more the building merges. The merge also sets how far a
+   root flares into the module it grows from (a smooth union with the body, like every other merge on this page).
+   No two of the four are alike: each has its own girth, its own number of branches, its own bow and landing place,
+   and runs on along the ground its own way.
 
    Nothing of a root is in the way of the vaults: inside the row it stays above the line the vaults pass under, and
    it only comes down outside the deck's edge.
@@ -33,9 +35,10 @@ function soften(P) {
   return P;
 }
 
-export function planRoots(b, U, rails, { k }) {
+export function planRoots(b, U, rails, { k, kMax = 20 }) {
   if (!rails || !U) return null;
-  const grow = Math.min(1, Math.max(0, k / FULL)), kr = 0.8 * Math.min(FULL, k); if (grow < 0.03) return null;
+  const grow = Math.min(1, Math.max(0, k / FULL)), kr = 0.8 * Math.min(FULL, k), more = Math.min(1, Math.max(0, (k - FULL) / Math.max(1, kMax - FULL))); if (grow < 0.03) return null;   // 0…1 down to the ground · 0…1 on along it
+  const fat = (0.78 + 0.22 * grow) * (1 + 0.3 * more);                               // a root also thickens as the merge grows
   const mp = rails.map, yFold = rails.yTop, f = U.f, sxy = U.nx * U.ny;
   const body = (x, y, d) => {                                                        // the merged body's own distance (m) at a point of the world
     const gx = (x - mp.x0w) / mp.dxw - U.x0, gy = (y - mp.y0w) / mp.dyw - U.y0, gz = (d - mp.z0w) / mp.dzw - U.z0; if (gx < 0 || gy < 0 || gz < 0 || gx > U.nx - 1.001 || gy > U.ny - 1.001 || gz > U.nz - 1.001) return 9;
@@ -48,24 +51,35 @@ export function planRoots(b, U, rails, { k }) {
     const xs = []; for (const v of [...row.vaults].sort((a, c) => a.xc - c.xc)) for (const x of [v.xc - v.L / 2, v.xc + v.L / 2]) { const last = xs[xs.length - 1]; if (last && x - last.x < 3) { last.x = (last.x * last.n + x) / (last.n + 1); last.n++; last.i = v.i; } else xs.push({ x, n: 1, i: v.i }); }
     const ends = xs.length > 1 ? [[xs[0], -1], [xs[xs.length - 1], 1]] : [];           // only the far corners: the two ends of the row
     ends.forEach(([c, end], ci) => { for (const side of [-1, 1]) {                    // the street edge, the bay edge
-      const dEdge = side < 0 ? row.dW : row.dE, out = side, id = ri * 1000 + ci * 2 + (side > 0 ? 1 : 0), j = n => hash(id, n, 77) - 0.5;   // `out` points away from the row, `end` away from its middle
+      const dEdge = side < 0 ? row.dW : row.dE, out = side, id = ri * 1000 + ci * 2 + (side > 0 ? 1 : 0), j = n => hash(id, n, 77) - 0.5;
+      /* No two alike. thick: the trunk's girth · tips: how many branches it gathers · jy: how far under the line they join ·
+         fx, fo: where it lands, past the end (+) or back along the building (−), and further out · bx, bo: how it bows on the way ·
+         hx, ho, curl, run: which way it runs on along the ground, how it curls, how far (m) */
+      const K = [{ thick: 1.12, tips: 7, jy: -3.2, fx: 0.8, fo: 0.3, bx: 0.3, bo: 0.5, hx: 0.45, ho: 1, curl: 0.5, run: 12 },      // stout and nearly straight, then straight out
+                 { thick: 0.82, tips: 4, jy: -2.4, fx: 7.5, fo: 1.0, bx: 5.4, bo: 2.2, hx: 1, ho: 0.12, curl: -0.4, run: 17 },     // a long leg thrown past the end, running on away from the building
+                 { thick: 0.98, tips: 6, jy: -4.4, fx: -6.5, fo: 2.6, bx: 2.4, bo: 4.2, hx: -1, ho: 0.3, curl: 0.7, run: 15 },     // bowed out and back along the building, then on along its edge
+                 { thick: 1.34, tips: 5, jy: -3.8, fx: 2.6, fo: 4.4, bx: -1.6, bo: 0.2, hx: 0.25, ho: 1, curl: -0.9, run: 9 }][(id + ri) % 4];   // the heaviest: a knee, a step straight out, a short hooked run   // `out` points away from the row, `end` away from its middle
       // where the branches start: the lowest point of the body over a few spots in from the corner
       const tips = [];
       for (const [dx, din] of [[1.6, 3.4], [4.2, 2.4], [8.2, 3.0], [12.5, 2.6], [3.4, 8.2], [7.6, 9.6], [12.0, 7.4]]) {
         const x = c.x - end * (dx + 1.6 * j(tips.length + 1)), d = dEdge - out * (din + 1.4 * j(tips.length + 11)); if (x < row.xa + 0.6 || x > row.xb - 0.6) continue;
         for (let y = yFold - 0.2; y < yFold + 16; y += 0.3) if (body(x, y, d) < -0.25) { tips.push([x, Math.max(y + 0.6, yFold + 0.95), d, 0.55, dx]); break; }
       }
-      if (tips.length < 2) continue;
-      const rJ = Math.min(2.1, Math.max(1.6, 0.72 * Math.sqrt(tips.length))), OUT = 1.5 * rJ + 0.9;   // the trunk carries what its branches bring; its axis stands clear of the row's edge
-      const J = [c.x + end * (0.8 + 0.6 * j(21)), yFold - 3.4 + 0.8 * j(22), dEdge + out * OUT], paths = [];   // where the branches join: outside the edge, a little past the end, under the line
+      if (tips.length < 2) continue; tips.length = Math.min(tips.length, K.tips);
+      const rJ = Math.min(2.1, Math.max(1.6, 0.72 * Math.sqrt(tips.length))) * K.thick, OUT = 1.5 * rJ + 0.9;   // the trunk carries what its branches bring; its axis stands clear of the row's edge
+      const J = [c.x + end * (0.8 + 0.6 * j(21)), yFold + K.jy + 0.6 * j(22), dEdge + out * OUT], paths = [];   // where the branches join: outside the edge, a little past the end, under the line
       for (const T of tips) {
         const E = [c.x + (T[0] - c.x) * 0.42, yFold + 0.95 + Math.min(1.8, 0.3 * (T[1] - yFold - 0.95)), dEdge + out * EDGE, 0.72], tip = T.slice(0, 4);
         paths.push({ pts: soften([tip, [T[0] + (E[0] - T[0]) * 0.45, (T[1] + E[1]) / 2, T[2] + (E[2] - T[2]) * 0.55, 0.64], E, [...J, 0.8]]), from: 'tip' });
       }
-      /* one thick piece from the join to the ground: no toes, only a wider foot */
-      const yMid = (J[1] + 0.5) / 2, M = [J[0] + end * 0.3 + 0.9 * j(32), yMid + 0.8 * j(35), dEdge + out * (OUT + 0.3 + 0.4 * (j(33) + 0.5)), rJ * 0.96];
-      paths.push({ pts: soften([[...J, rJ], M, [M[0] + 0.5 * j(34), 2.6, M[2] + out * 0.15, rJ * 1.08]]), from: 'join' });
-      paths.push({ pts: [[M[0] + 0.5 * j(34), 2.6, M[2] + out * 0.15, rJ * 1.08], [M[0] + 0.5 * j(34), 0.9, M[2] + out * 0.25, rJ * 1.22], [M[0] + 0.5 * j(34), -0.8, M[2] + out * 0.3, rJ * 1.5]], from: 'split' });
+      /* one thick piece from the join to the ground — no toes — and then on along the ground as the merge goes on growing */
+      const G = [J[0] + end * K.fx + 0.6 * j(34), 0.5, J[2] + out * K.fo, rJ * 1.3];    // where it lands
+      const M = [(J[0] + G[0]) / 2 + end * K.bx, (J[1] + G[1]) / 2 + 1.2 + 0.8 * j(35), (J[2] + G[2]) / 2 + out * K.bo, rJ * 0.94];
+      paths.push({ pts: soften([[...J, rJ], M, [G[0] - end * K.fx * 0.12, 3.4, G[2] - out * K.fo * 0.1, rJ * 1.08], G]), from: 'join' });
+      const run = [G]; { let hx = end * K.hx, ho = K.ho; const n = 9, st = K.run / n, turn = K.curl / n;
+        for (let i = 1; i <= n; i++) { const c0 = Math.cos(turn * end * out), s0 = Math.sin(turn * end * out), nx = hx * c0 - ho * s0, no = hx * s0 + ho * c0, L = Math.hypot(nx, no) || 1; hx = nx / L; ho = Math.max(0.05, no / L);   // it never turns back in under the building
+          const q = run[run.length - 1], r = rJ * (1.3 - 0.85 * i / n); run.push([q[0] + hx * st, 0.25 * r, q[2] + out * ho * st, r]); } }
+      paths.push({ pts: run, from: 'split' });
       // every piece with how far down the tree it is (from the tips), so the roots can be drawn part grown
       const segs = [], len = p => { let L = 0; for (let i = 0; i < p.length - 1; i++) L += Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1], p[i + 1][2] - p[i][2]); return L; };
       const lay = (p, s0) => { let s = s0; for (let i = 0; i < p.length - 1; i++) { const a = p[i], q = p[i + 1], l = Math.hypot(q[0] - a[0], q[1] - a[1], q[2] - a[2]); segs.push({ a, b: q, s0: s, s1: s + l }); s += l; } return s; };
@@ -73,7 +87,10 @@ export function planRoots(b, U, rails, { k }) {
       for (const p of paths) if (p.from === 'tip') lay(p.pts, sJoin - len(p.pts));    // a short branch starts later, so all arrive at the join together
       for (const p of paths) if (p.from === 'join') sSplit = lay(p.pts, sJoin);
       for (const p of paths) if (p.from === 'split') total = Math.max(total, lay(p.pts, sSplit));
-      const reach = grow * total, live = [];
+      const reach = grow * sSplit + Math.pow(more, 0.8) * (total - sSplit), live = [];   // down to the ground by a merge of 3 m, then on along it
+      for (const q of segs) for (const e of [q.a, q.b]) if (!e.fat) { e[3] *= fat; e.fat = true; }
+      for (const q of segs) if (q.s0 >= sSplit - 1e-6) for (const [e, sv] of [[q.a, q.s0], [q.b, q.s1]]) {     // along the ground it tapers to wherever its tip is now
+        const fr = Math.min(1, (sv - sSplit) / Math.max(0.5, reach - sSplit)); e[3] = rJ * fat * (1.3 - 0.85 * fr); if (fr > 0) e[1] = 0.25 * e[3]; }
       for (const q of segs) { if (q.s0 >= reach) continue; if (q.s1 <= reach) { live.push(q); continue; } const t = (reach - q.s0) / (q.s1 - q.s0); live.push({ a: q.a, b: q.a.map((v, i) => v + (q.b[i] - v) * t) }); }
       const box = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9]; for (const q of live) for (const p of [q.a, q.b]) for (let i = 0; i < 3; i++) { box[i] = Math.min(box[i], p[i] - p[3]); box[i + 3] = Math.max(box[i + 3], p[i] + p[3]); }
       trees.push({ id, mod: c.i, x: c.x, dEdge, out, segs: live, box, grounded: grow >= 0.999 });
@@ -92,7 +109,7 @@ export function planRoots(b, U, rails, { k }) {
     for (const t of trees) { const B = t.box; if (x < B[0] - pad || x > B[3] + pad || y > B[4] + pad || d < B[2] - pad || d > B[5] + pad) continue; if (root(t, x, y, d) < pad) return true; }
     return false;
   };
-  return { trees, body, root, near, kr, yFold, grow, stats: { count: trees.length, grounded: trees.filter(t => t.grounded).length } };
+  return { trees, body, root, near, kr, yFold, grow, stats: { count: trees.length, grounded: trees.filter(t => t.grounded).length, running: more > 0.02 } };
 }
 
 export function buildRoots(plan, mats) {
