@@ -3,8 +3,8 @@
    When the public floor folds, what stays above it has to stand on something once the vaults have slid away. So as
    the modules merge, the lowest parts of the building grow roots: at the four far corners of a row of ground bays —
    its two ends, on both long edges — branches leave the underside of the modules beside the corner, run to the
-   edge, join into one thick trunk outside the path of the sliding vaults, and come down past the deck to the ground,
-   where the trunk splits into toes. They are pillars, drawn as a tree's roots. (The middle of the row stands on the
+   edge, join into one thick trunk outside the path of the sliding vaults, and come down past the deck to the ground
+   in one piece, a little wider at the foot. They are pillars, drawn as a tree's roots. (The middle of the row stands on the
    two vaults that stay.)
 
    Roots come with the merge: none at 0, hanging part of the way down at a small merge, on the ground from 3 m. The
@@ -56,21 +56,16 @@ export function planRoots(b, U, rails, { k }) {
         for (let y = yFold - 0.2; y < yFold + 16; y += 0.3) if (body(x, y, d) < -0.25) { tips.push([x, Math.max(y + 0.6, yFold + 0.95), d, 0.55, dx]); break; }
       }
       if (tips.length < 2) continue;
-      const rJ = Math.min(1.8, Math.max(1.3, 0.6 * Math.sqrt(tips.length))), OUT = rJ + 1.0;   // the trunk carries what its branches bring; its axis stands clear of the row's edge
+      const rJ = Math.min(2.1, Math.max(1.6, 0.72 * Math.sqrt(tips.length))), OUT = 1.5 * rJ + 0.9;   // the trunk carries what its branches bring; its axis stands clear of the row's edge
       const J = [c.x + end * (0.8 + 0.6 * j(21)), yFold - 3.4 + 0.8 * j(22), dEdge + out * OUT], paths = [];   // where the branches join: outside the edge, a little past the end, under the line
       for (const T of tips) {
         const E = [c.x + (T[0] - c.x) * 0.42, yFold + 0.95 + Math.min(1.8, 0.3 * (T[1] - yFold - 0.95)), dEdge + out * EDGE, 0.72], tip = T.slice(0, 4);
         paths.push({ pts: soften([tip, [T[0] + (E[0] - T[0]) * 0.45, (T[1] + E[1]) / 2, T[2] + (E[2] - T[2]) * 0.55, 0.64], E, [...J, 0.8]]), from: 'tip' });
-        /* further along the edge, a thinner root of its own: off the branch where it crosses the edge, straight to the ground */
-        if (T[4] > 7 && T[2] * out > (dEdge - out * 4) * out) { const n = 50 + paths.length, F = [E[0] - end * (1.5 + 1.2 * (j(n) + 0.5)), -0.5, dEdge + out * (EDGE + 1.6 + 1.6 * (j(n + 1) + 0.5)), 0.4];
-          paths.push({ pts: soften([[E[0], E[1], E[2], 0.5], [E[0] + (F[0] - E[0]) * 0.3, yFold - 3.2, dEdge + out * (EDGE + 1.1), 0.5], [E[0] + (F[0] - E[0]) * 0.8, 3.4 + 0.8 * j(n + 2), F[2] - out * 0.4, 0.46], F]), from: 'prop' }); }
       }
-      const ySplit = 7.4 + 1.2 * j(31), S = [J[0] + end * 0.4 + 0.8 * j(32), ySplit, dEdge + out * (OUT + 0.5 + 0.5 * (j(33) + 0.5)), rJ * 1.1];
-      paths.push({ pts: soften([[...J, rJ], [J[0] + 0.9 * j(34), (J[1] + ySplit) / 2 + 0.6 * j(35), dEdge + out * (OUT + 0.35 + 0.5 * (j(36) + 0.5)), rJ * 0.95], S]), from: 'join' });
-      for (const [tx, to, n] of [[end * 5.6, 0.6, 41], [-end * 5.2, 1.4, 42], [end * 1.2, 5.6, 43], [end * 4.6, 4.2, 44], [-end * 2.2, 4.8, 45]]) {   // toes: past the end, back along the building, straight out, and between
-        const F = [S[0] + tx + 1.2 * j(n), -0.6, dEdge + out * (OUT + to + 0.8 * (j(n + 10) + 0.5)), 0.5];
-        paths.push({ pts: soften([[...S.slice(0, 3), 0.86], [S[0] + (F[0] - S[0]) * 0.58, 2.9 + 0.8 * j(n + 20), S[2] + (F[2] - S[2]) * 0.58, 0.72], F]), from: 'split' });
-      }
+      /* one thick piece from the join to the ground: no toes, only a wider foot */
+      const yMid = (J[1] + 0.5) / 2, M = [J[0] + end * 0.3 + 0.9 * j(32), yMid + 0.8 * j(35), dEdge + out * (OUT + 0.3 + 0.4 * (j(33) + 0.5)), rJ * 0.96];
+      paths.push({ pts: soften([[...J, rJ], M, [M[0] + 0.5 * j(34), 2.6, M[2] + out * 0.15, rJ * 1.08]]), from: 'join' });
+      paths.push({ pts: [[M[0] + 0.5 * j(34), 2.6, M[2] + out * 0.15, rJ * 1.08], [M[0] + 0.5 * j(34), 0.9, M[2] + out * 0.25, rJ * 1.22], [M[0] + 0.5 * j(34), -0.8, M[2] + out * 0.3, rJ * 1.5]], from: 'split' });
       // every piece with how far down the tree it is (from the tips), so the roots can be drawn part grown
       const segs = [], len = p => { let L = 0; for (let i = 0; i < p.length - 1; i++) L += Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1], p[i + 1][2] - p[i][2]); return L; };
       const lay = (p, s0) => { let s = s0; for (let i = 0; i < p.length - 1; i++) { const a = p[i], q = p[i + 1], l = Math.hypot(q[0] - a[0], q[1] - a[1], q[2] - a[2]); segs.push({ a, b: q, s0: s, s1: s + l }); s += l; } return s; };
@@ -78,7 +73,6 @@ export function planRoots(b, U, rails, { k }) {
       for (const p of paths) if (p.from === 'tip') lay(p.pts, sJoin - len(p.pts));    // a short branch starts later, so all arrive at the join together
       for (const p of paths) if (p.from === 'join') sSplit = lay(p.pts, sJoin);
       for (const p of paths) if (p.from === 'split') total = Math.max(total, lay(p.pts, sSplit));
-      for (const p of paths) if (p.from === 'prop') lay(p.pts, Math.max(0, total - len(p.pts)));          // the thin roots touch down with the toes
       const reach = grow * total, live = [];
       for (const q of segs) { if (q.s0 >= reach) continue; if (q.s1 <= reach) { live.push(q); continue; } const t = (reach - q.s0) / (q.s1 - q.s0); live.push({ a: q.a, b: q.a.map((v, i) => v + (q.b[i] - v) * t) }); }
       const box = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9]; for (const q of live) for (const p of [q.a, q.b]) for (let i = 0; i < 3; i++) { box[i] = Math.min(box[i], p[i] - p[3]); box[i + 3] = Math.max(box[i + 3], p[i] + p[3]); }
