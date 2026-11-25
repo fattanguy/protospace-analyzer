@@ -28,6 +28,7 @@ import * as THREE from 'three';
 import { meshOf } from './rails.js';
 
 const EDGE = 1.0, STEP = 0.3, FULL = 3;                                    // where a branch crosses the row's edge, outside it · the sampling step · the merge at which the roots reach the ground (m)
+export const ROOT_REACH = 9.6;                                                        // how far outside a row's edge the thickest pillar can reach, with a margin (m): the ground slab is made that much wider
 const hash = (a, b, c) => { let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263) ^ Math.imul(c | 0, 1274126177); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
 

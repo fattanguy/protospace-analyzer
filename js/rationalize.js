@@ -15,7 +15,7 @@ import { moduleField, unionField, detailField, netsField, plateField, extrudeOut
 import { taubin } from './fuse.js';
 import { planInterior, buildInterior, toPLY, ELEMENTS } from './interior.js';
 import { planRails, buildRails, moveBlocks } from './rails.js';
-import { planRoots, buildRoots } from './roots.js';
+import { planRoots, buildRoots, ROOT_REACH } from './roots.js';
 
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -93,7 +93,7 @@ function makeMeshes() {
   const vor = { style: S.winStyle, cell: S.vor, jit: 0.35 + 0.65 * S.winVar, rib: Math.max(0.38, 0.6 * step), closed: 0.22 };   // the Voronoi web: cell size, how irregular, half a rib, the share of cells left closed
   const rails = folds ? planRails(b, B.fields, { yBase, H: S.H, tf, yFold, vor: S.windows && S.winStyle === 'voronoi' ? vor : null }) : null; B.rails = null;
   const roots = rails && S.roots ? planRoots(b, U, rails, { k: S.k, kMax: KMAX }) : null;   // js/roots.js: pillars that grow out of the lowest modules as they merge
-  if (roots) for (const t of roots.trees) { const q = rails.decks[rails.rows.indexOf(t.row)]; if (q) { q.d0 = Math.min(q.d0, t.d - t.r0 - 1.5); q.d1 = Math.max(q.d1, t.d + t.r0 + 1.5); } }   // the ground slab runs out under the pillars: they stand on it
+  if (rails && S.roots) for (const q of rails.decks) { q.d0 -= ROOT_REACH; q.d1 += ROOT_REACH; }   // the ground slab runs out under where the pillars stand — always, so it does not change as they grow
   const mesh = (kind, mat) => {
     const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar, ...vor, keep: roots ? (gx, wy, gz) => roots.near(b.gridX(gx), wy, -b.gridZ(gz)) : null, fine: S.tall ? i => (b.mods[i] && (b.mods[i].use === 'social' || b.mods[i].use === 'hybrid') ? 0.6 : 1) : null } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
