@@ -26,7 +26,7 @@ const USES = ['lobby', 'office', 'social', 'hybrid'];
 // ------------------------------------------------------------------ planning
 /* U: the union field; mods: the placed modules (use); LAT: metres per voxel; yBase: the first level line (m);
    H: storey height; t: wall thickness; tf: plate thickness; opts: which parts. */
-export function planInterior(U, mods, { LAT, yBase, H, t, tf, opts }) {
+export function planInterior(U, mods, { LAT, yBase, H, t, tf, pitch = 0, opts }) {
   const { nx, ny, nz, f, lab } = U, sxy = nx * ny;
   const F = (gx, wy, gz) => {                                                      // the field (m) at grid x, z and height wy (m), trilinear
     const x = Math.min(nx - 1.001, Math.max(0, gx - U.x0)), y = Math.min(ny - 1.001, Math.max(0, wy / LAT - 0.5 - U.y0)), z = Math.min(nz - 1.001, Math.max(0, gz - U.z0));
@@ -47,7 +47,14 @@ export function planInterior(U, mods, { LAT, yBase, H, t, tf, opts }) {
   const cen = centroid.map(c => c[2] ? [U.x0 + c[0] / c[2], U.z0 + c[1] / c[2]] : null);
   const holes = Array.from({ length: NL + 1 }, () => []), parts = [], plan = { levels, holes, parts, atria: [], lifts: [], stairs: [], rooms, NL };
   const addHole = (n, h) => { if (n >= 0 && n <= NL) holes[n].push(h); };
+  /* High rooms (opts.tall): a gathering room keeps one floor and a hybrid two — its own and the one half-way up — instead of a
+     plate at every storey; the others are left out whole, so these rooms are 18 m and 9 m high. `pitch` is a level's height (m). */
+  const per = pitch ? Math.max(1, Math.round(pitch / H)) : 0, floorsOf = i => { const u = opts.tall && per > 1 && mods[i] ? mods[i].use : ''; return u === 'social' ? 1 : u === 'hybrid' ? 2 : 0; };
+  const keepFloor = (i, n) => { const fl = floorsOf(i); if (!fl) return true; const idx = n - Math.round(mods[i].L * pitch / H); return idx <= 0 || (fl === 2 && idx === Math.ceil(per / 2)); };
+  const cutTall = (n, gx, gz) => { if (!per || n >= NL) return false; const i = L(gx, levels[n] + H / 2, gz); return i >= 0 && !keepFloor(i, n); };
+  plan.floorsOf = floorsOf;
   const holeDist = (n, gx, gz) => {                                                // metres, negative inside an opening of level n
+    if (cutTall(n, gx, gz)) return -9;
     let d = 1e9; for (const h of holes[n] || []) { const dx = gx - h.x, dz = gz - h.z;
       const v = h.r != null ? (Math.hypot(dx, dz) - h.r) * LAT : (() => { const qx = Math.abs(dx) - h.hx, qz = Math.abs(dz) - h.hz; return (Math.hypot(Math.max(qx, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qz), 0)) * LAT; })();
       if (v < d) d = v; }
@@ -59,6 +66,7 @@ export function planInterior(U, mods, { LAT, yBase, H, t, tf, opts }) {
   if (opts.voids) {
     const found = [];
     for (let i = 0; i < M; i++) {
+      if (floorsOf(i)) continue;                                                   // a high room needs no void cut in it
       const mine = [];                                                             // up to two per module, the widest that fit first, apart from each other
       for (const R of [6, 4.5, 3.2, 2.4]) {
         while (mine.length < 2) {
@@ -94,7 +102,7 @@ export function planInterior(U, mods, { LAT, yBase, H, t, tf, opts }) {
     let best = null;
     for (const [gx, gz] of cellsOf[i]) {
       if (!free(gx, gz, LIFT / 2 * m2g, LIFT / 2 * m2g, 1.5)) continue;
-      const fits = n => L(gx, levels[n] + H / 2, gz) === i && clear(gx, levels[n] + 0.5, gz, 1.9) && clear(gx, levels[n] + H - 0.6, gz, 1.4) && !voidAt(n, gx, gz, 3) && !voidAt(n + 1, gx, gz, 3);
+      const fits = n => L(gx, levels[n] + H / 2, gz) === i && keepFloor(i, n) && clear(gx, levels[n] + 0.5, gz, 1.9) && clear(gx, levels[n] + H - 0.6, gz, 1.4) && !voidAt(n, gx, gz, 3) && !voidAt(n + 1, gx, gz, 3);
       const [len, a] = run(fits); if (len < 2) continue;
       const sc = len * 1000 - Math.hypot(gx - cen[i][0], gz - cen[i][1]) * 0.5;
       if (!best || sc > best.sc) best = { sc, i, x: gx, z: gz, a, len };

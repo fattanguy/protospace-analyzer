@@ -6,8 +6,8 @@
    building has real mass over it — it looks, up to a bay and a half in, for the place with the most material
    standing above (the inside of a thick body counting for more than a thin wall or a neck), and starts its branches
    at the lowest points of the body there. The branches run to the edge, join into one thick trunk outside the path
-   of the sliding vaults, and that trunk comes down past the deck as a straight pillar, plumb for its last metres,
-   so that it meets the ground as a circle. No foot, no toes.
+   of the sliding vaults, and that trunk comes down as a straight pillar, plumb for its last metres, onto the ground
+   slab — the deck, which runs out under it — where it ends as a circle. No foot, no toes, nothing below the ground.
 
    The outer shell is the structure: where a root flares out of it, and in a pier straight above every pillar, the
    shell keeps no openings, so the load of the levels above has a wall to come down in; and beyond the last root, where
@@ -45,7 +45,7 @@ export function planRoots(b, U, rails, { k, kMax = 20 }) {
   if (!rails || !U) return null;
   const grow = Math.min(1, Math.max(0, k / FULL)), kr = 0.8 * Math.min(FULL, k), more = Math.min(1, Math.max(0, (k - FULL) / Math.max(1, kMax - FULL))); if (grow < 0.03) return null;   // 0…1 down to the ground · 0…1 beyond that
   const fat = (0.78 + 0.22 * grow) * (1 + 0.3 * more);                               // a root also thickens as the merge grows
-  const mp = rails.map, yFold = rails.yTop, f = U.f, sxy = U.nx * U.ny;
+  const mp = rails.map, yFold = rails.yTop, yG = rails.yDeck, f = U.f, sxy = U.nx * U.ny;   // the line the vaults pass under · the ground the pillars stand on: the top of the deck
   const body = (x, y, d) => {                                                        // the merged body's own distance (m) at a point of the world
     const gx = (x - mp.x0w) / mp.dxw - U.x0, gy = (y - mp.y0w) / mp.dyw - U.y0, gz = (d - mp.z0w) / mp.dzw - U.z0; if (gx < 0 || gy < 0 || gz < 0 || gx > U.nx - 1.001 || gy > U.ny - 1.001 || gz > U.nz - 1.001) return 9;
     const xi = Math.floor(gx), yi = Math.floor(gy), zi = Math.floor(gz), tx = gx - xi, ty = gy - yi, tz = gz - zi, i = xi + U.nx * (yi + U.ny * zi);
@@ -82,8 +82,8 @@ export function planRoots(b, U, rails, { k, kMax = 20 }) {
       }
       /* one straight pillar from the join to the ground, plumb for its last metres, so that it meets the ground as a circle: no foot, no toes */
       const F = [xJ + K.lx, dEdge + out * (OUT + K.lo)];
-      paths.push({ pts: soften([[...J, rJ], [(J[0] + F[0]) / 2, (J[1] + 4.5) / 2, (J[2] + F[1]) / 2, rJ], [F[0], 4.5, F[1], rJ]]), from: 'join' });
-      paths.push({ pts: [[F[0], 4.5, F[1], rJ], [F[0], -2.5, F[1], rJ]], from: 'split' });
+      paths.push({ pts: soften([[...J, rJ], [(J[0] + F[0]) / 2, (J[1] + yG + 3) / 2, (J[2] + F[1]) / 2, rJ], [F[0], yG + 3, F[1], rJ]]), from: 'join' });
+      paths.push({ pts: [[F[0], yG + 3, F[1], rJ], [F[0], yG - 2.5, F[1], rJ]], from: 'split' });
       // every piece with how far down the tree it is (from the tips), so the roots can be drawn part grown
       const segs = [], len = p => { let L = 0; for (let i = 0; i < p.length - 1; i++) L += Math.hypot(p[i + 1][0] - p[i][0], p[i + 1][1] - p[i][1], p[i + 1][2] - p[i][2]); return L; };
       const lay = (p, s0) => { let s = s0; for (let i = 0; i < p.length - 1; i++) { const a = p[i], q = p[i + 1], l = Math.hypot(q[0] - a[0], q[1] - a[1], q[2] - a[2]); segs.push({ a, b: q, s0: s, s1: s + l }); s += l; } return s; };
@@ -95,7 +95,7 @@ export function planRoots(b, U, rails, { k, kMax = 20 }) {
       for (const q of segs) for (const e of [q.a, q.b]) if (!e.fat) { e[3] *= fat; e.fat = true; }
       for (const q of segs) { if (q.s0 >= reach) continue; if (q.s1 <= reach) { live.push(q); continue; } const t = (reach - q.s0) / (q.s1 - q.s0); live.push({ a: q.a, b: q.a.map((v, i) => v + (q.b[i] - v) * t) }); }
       const box = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9]; for (const q of live) for (const p of [q.a, q.b]) for (let i = 0; i < 3; i++) { box[i] = Math.min(box[i], p[i] - p[3]); box[i + 3] = Math.max(box[i + 3], p[i] + p[3]); }
-      trees.push({ id, mod: vEnd.i, x: F[0], r: rJ * fat, inw, inFromEnd: Math.abs(F[0] - xEnd), dEdge, out, row, segs: live, box, grounded: grow >= 0.999 });
+      trees.push({ id, mod: vEnd.i, x: F[0], d: F[1], r: rJ * fat, r0: rJ * 1.3, inw, inFromEnd: Math.abs(F[0] - xEnd), dEdge, out, row, segs: live, box, grounded: grow >= 0.999 });
     } });
   });
   if (!trees.length) return null;
@@ -119,18 +119,18 @@ export function planRoots(b, U, rails, { k, kMax = 20 }) {
   const row0 = rails.rows[0], sup = [...new Set([...trees.filter(t => t.row === row0).map(t => t.x), ...rails.ribs.filter(q => row0.vaults.includes(q.v)).map(q => q.x)].map(x => Math.round(x)))].sort((a, c) => a - c);
   let span = 0; for (let i = 1; i < sup.length; i++) span = Math.max(span, sup[i] - sup[i - 1]);
   const overhang = sup.length ? Math.max(sup[0] - row0.xa, row0.xb - sup[sup.length - 1]) : 0;
-  return { trees, body, root, near, kr, yFold, grow, stats: { count: trees.length, grounded: trees.filter(t => t.grounded).length, span, overhang, walls: rails.ribs.length, inFromEnd: trees.map(t => Math.round(t.inFromEnd)), girth: trees.map(t => +(2 * t.r).toFixed(1)) } };
+  return { trees, body, root, near, kr, yFold, yG, grow, stats: { count: trees.length, grounded: trees.filter(t => t.grounded).length, span, overhang, walls: rails.ribs.length, inFromEnd: trees.map(t => Math.round(t.inFromEnd)), girth: trees.map(t => +(2 * t.r).toFixed(1)) } };
 }
 
 export function buildRoots(plan, mats) {
-  const group = new THREE.Group(); group.name = 'Valve HQ · roots'; const { kr, yFold } = plan, lim = Math.max(0.3, 0.9 * kr);
+  const group = new THREE.Group(); group.name = 'Valve HQ · roots'; const { kr, yFold, yG } = plan, lim = Math.max(0.3, 0.9 * kr);
   for (const t of plan.trees) {
     const B = t.box, m = lim + 0.6;
     const g = meshOf((x, y, d) => {
       const r = plan.root(t, x, y, d); if (r > lim + 0.5) return r - lim;
       const bf = plan.body(x, y, d), inRow = -t.out * (d - t.dEdge);                 // how far inside the row's edge
-      return Math.max(kr > 0.05 ? smin(r, bf, kr) : r, r - lim, -(bf + 0.3), -y, Math.min(inRow + 0.1, yFold - 0.05 - y));   // flared into the body · only round the root · not inside the body · cut at the ground · never under the line inside the row
-    }, B[0] - m, B[3] + m, Math.max(-STEP, B[1] - m), B[4] + m, B[2] - m, B[5] + m, STEP, 2);
+      return Math.max(kr > 0.05 ? smin(r, bf, kr) : r, r - lim, -(bf + 0.3), yG - y, Math.min(inRow + 0.1, yFold - 0.05 - y));   // flared into the body · only round the root · not inside the body · cut at the ground · never under the line inside the row
+    }, B[0] - m, B[3] + m, Math.max(yG - STEP, B[1] - m), B[4] + m, B[2] - m, B[5] + m, STEP, 2);
     if (!g) continue;
     const mesh = new THREE.Mesh(g, mats.root || mats.vault || mats.solid); mesh.castShadow = mesh.receiveShadow = true; mesh.name = `root ${t.id}`;
     mesh.userData = { element: 0, mods: new Int16Array(g.getAttribute('position').count).fill(t.mod) }; group.add(mesh);

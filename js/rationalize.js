@@ -21,7 +21,7 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const KMAX = 20;
 const BODY = 0xdcd6cd;                                                              // one material for the body: walls, floors, stairs and solid partitions                                                                     // the widest blend the sliders allow (m)
-const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, fold: 2, roots: true, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 3, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
+const DEF = { k: 3, t: 0.8, tf: 0.4, winVar: 0.6, windows: false, view: 'solid', voids: true, stairs: true, lifts: true, partitions: true, windows: true, plyColor: 'element', plyDensity: 8, floors: true, rails: true, rail: 0, fold: 2, roots: true, tall: true, winStyle: 'voronoi', vor: 5.4, H: 4.5, rev: 3, tf: 0.35, res: 2, soft: 1, opacity: 0.35, cutY: 70, cutZ: 0, cutX: 0, overrides: {} };
 const S = load();
 const hollow = () => true;                                                        // every view has walls, floors and openings: 'solid' draws them opaque, 'hollow' fades the shell, 'interior' leaves it off
 const B = { building: null, key: '', fields: null, union: null, sel: [], hover: -1, three: null, busy: false, again: false, timer: 0, ms: {} };
@@ -89,12 +89,13 @@ function makeMeshes() {
   };
   const labelsOf = (pos, fine) => { const L = new Int16Array(pos.length / 3); for (let v = 0; v < L.length; v++) { const x = Math.round(pos[v * 3] / fine), y = Math.round(pos[v * 3 + 1] / fine), z = Math.round(pos[v * 3 + 2] / fine); L[v] = U.lab[Math.min(U.nx - 1, x) + U.nx * (Math.min(U.ny - 1, y) + U.ny * Math.min(U.nz - 1, z))] - 1; } return L; };
   const step = b.LAT / s, t = hollow() ? Math.max(S.t, 1.1 * step) : 0, tf = S.tf, yBase = b.PODIUM_V * b.LAT;   // nothing thinner than the sampling step, or it falls between samples
-  B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions } }) : null;
+  B.plan = hollow() && S.floors ? planInterior(U, b.mods, { LAT: b.LAT, yBase, H: S.H, t, tf, pitch: b.PITCH_V * b.LAT, opts: { voids: S.voids, stairs: S.stairs, lifts: S.lifts, partitions: S.partitions, tall: S.tall } }) : null;
   const vor = { style: S.winStyle, cell: S.vor, jit: 0.35 + 0.65 * S.winVar, rib: Math.max(0.38, 0.6 * step), closed: 0.22 };   // the Voronoi web: cell size, how irregular, half a rib, the share of cells left closed
   const rails = folds ? planRails(b, B.fields, { yBase, H: S.H, tf, yFold, vor: S.windows && S.winStyle === 'voronoi' ? vor : null }) : null; B.rails = null;
   const roots = rails && S.roots ? planRoots(b, U, rails, { k: S.k, kMax: KMAX }) : null;   // js/roots.js: pillars that grow out of the lowest modules as they merge
+  if (roots) for (const t of roots.trees) { const q = rails.decks[rails.rows.indexOf(t.row)]; if (q) { q.d0 = Math.min(q.d0, t.d - t.r0 - 1.5); q.d1 = Math.max(q.d1, t.d + t.r0 + 1.5); } }   // the ground slab runs out under the pillars: they stand on it
   const mesh = (kind, mat) => {
-    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar, ...vor, keep: roots ? (gx, wy, gz) => roots.near(b.gridX(gx), wy, -b.gridZ(gz)) : null } : null });
+    const D = detailField(U, s, kind, { t, tf, H: S.H, yBase, yOf, holeAt: kind === 'floors' && B.plan ? B.plan.holeAt : null, windows: kind === 'shell' && S.windows && S.view !== 'interior' ? { sill: 0.8, head: 0.6, pier: 6, pierW: 1.5, LAT: b.LAT, vary: S.winVar, ...vor, keep: roots ? (gx, wy, gz) => roots.near(b.gridX(gx), wy, -b.gridZ(gz)) : null, fine: S.tall ? i => (b.mods[i] && (b.mods[i].use === 'social' || b.mods[i].use === 'hybrid') ? 0.6 : 1) : null } : null });
     let { pos, index } = netsField(D.F, D.FX, D.FY, D.FZ);
     if (!index.length) return null;
     const labels = labelsOf(pos, s);
@@ -219,6 +220,7 @@ const HTML = `
     ${slider('soft', 'Soften the voxel steps', 0, 3, 1, '')}
     <h2 class="eyebrow" style="margin-top:16px">The interior</h2>
     <p class="hint">Planned from the merged volume, storey by storey, in the hollow and interior views.</p>
+    <label class="chk"><input type="checkbox" data-c="tall"> High rooms: a gathering room keeps one floor and a hybrid two, 18 m and 9 m high, behind a finer web of windows</label>
     <label class="chk"><input type="checkbox" data-c="voids"> Double-height voids and one atrium through the full height</label>
     <label class="chk"><input type="checkbox" data-c="stairs"> Stairs between every pair of floors</label>
     <label class="chk"><input type="checkbox" data-c="lifts"> Lift shafts</label>
@@ -261,7 +263,7 @@ function syncControls() {
   $$('[data-win]', R.root).forEach(x => { x.classList.toggle('on', x.dataset.win === S.winStyle); x.disabled = S.view === 'interior' || !S.windows; }); R.root.querySelector('[data-s=vor]').disabled = S.view === 'interior' || !S.windows || S.winStyle !== 'voronoi';
   $$('[data-mode]', R.root).forEach(x => x.classList.toggle('on', x.dataset.mode === S.view));
   R.modeNote.textContent = S.view === 'interior' ? 'Only what is inside: the floors, the voids, the stairs, the lifts and the rooms — no outer walls.' : hollow() ? 'Walls inside the surface, floor plates every storey, and a shell you can fade or cut away to see the rooms.' : 'The building as it looks from outside: the merged modules with their walls, opaque.';
-  for (const k of ['voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors;
+  for (const k of ['tall', 'voids', 'stairs', 'lifts', 'partitions']) R.root.querySelector(`[data-c=${k}]`).disabled = !hollow() || !S.floors;
   R.root.querySelector('[data-c=rails]').disabled = !S.floors; R.root.querySelector('[data-c=roots]').disabled = !S.floors || !S.rails; R.root.querySelector('[data-s=rail]').disabled = R.root.querySelector('[data-s=fold]').disabled = !S.floors || !S.rails;
   R.root.querySelector('[data-c=windows]').disabled = S.view === 'interior'; R.root.querySelector('[data-s=winVar]').disabled = S.view === 'interior' || !S.windows;
   R.plyColor.value = S.plyColor; R.plyDensity.value = String(S.plyDensity);
